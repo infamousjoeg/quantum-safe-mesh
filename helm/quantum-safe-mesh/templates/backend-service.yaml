@@ -1,0 +1,123 @@
+{{- if .Values.backendService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.backendService.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    app: {{ .Values.backendService.name }}
+    component: backend
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.backendService.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.backendService.name }}
+      {{- include "quantum-safe-mesh.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.backendService.name }}
+        component: backend
+        {{- include "quantum-safe-mesh.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/backend-service.yaml") . | sha256sum }}
+        {{- if .Values.monitoring.prometheus.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.backendService.port | quote }}
+        prometheus.io/path: {{ .Values.monitoring.prometheus.path }}
+        {{- end }}
+        {{- with .Values.commonAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "quantum-safe-mesh.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.backendService.securityContext | nindent 8 }}
+      containers:
+      - name: backend-service
+        image: {{ include "quantum-safe-mesh.image" .Values.backendService.image }}
+        imagePullPolicy: {{ .Values.backendService.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.backendService.port }}
+          protocol: TCP
+        env:
+        - name: SERVICE_NAME
+          value: {{ .Values.backendService.name }}
+        - name: PORT
+          value: {{ .Values.backendService.port | quote }}
+        - name: AUTH_SERVICE_URL
+          value: {{ include "quantum-safe-mesh.authServiceUrl" . }}
+        resources:
+          {{- toYaml .Values.backendService.resources | nindent 10 }}
+        {{- if .Values.backendService.healthCheck.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.backendService.healthCheck.path }}
+            port: {{ .Values.backendService.port }}
+          initialDelaySeconds: {{ .Values.backendService.healthCheck.initialDelaySeconds }}
+          periodSeconds: {{ .Values.backendService.healthCheck.periodSeconds }}
+          timeoutSeconds: {{ .Values.backendService.healthCheck.timeoutSeconds }}
+          failureThreshold: {{ .Values.backendService.healthCheck.failureThreshold }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.backendService.healthCheck.path }}
+            port: {{ .Values.backendService.port }}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        {{- end }}
+        volumeMounts:
+        - name: keys-storage
+          mountPath: /root/keys
+      volumes:
+      - name: keys-storage
+        {{- if .Values.storage.persistent }}
+        persistentVolumeClaim:
+          claimName: {{ .Values.backendService.name }}-keys
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
+      {{- with .Values.backendService.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backendService.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backendService.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.backendService.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    app: {{ .Values.backendService.name }}
+    component: backend
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.backendService.service.type }}
+  ports:
+  - port: {{ .Values.backendService.service.port }}
+    targetPort: {{ .Values.backendService.port }}
+    protocol: TCP
+    name: http
+  selector:
+    app: {{ .Values.backendService.name }}
+    {{- include "quantum-safe-mesh.selectorLabels" . | nindent 4 }}
+{{- end }}

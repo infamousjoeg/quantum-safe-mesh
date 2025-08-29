@@ -1,0 +1,168 @@
+{{- if .Values.gatewayService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.gatewayService.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    app: {{ .Values.gatewayService.name }}
+    component: gateway
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gatewayService.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.gatewayService.name }}
+      {{- include "quantum-safe-mesh.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.gatewayService.name }}
+        component: gateway
+        {{- include "quantum-safe-mesh.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/gateway-service.yaml") . | sha256sum }}
+        {{- if .Values.monitoring.prometheus.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.gatewayService.port | quote }}
+        prometheus.io/path: {{ .Values.monitoring.prometheus.path }}
+        {{- end }}
+        {{- with .Values.commonAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "quantum-safe-mesh.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.gatewayService.securityContext | nindent 8 }}
+      containers:
+      - name: gateway-service
+        image: {{ include "quantum-safe-mesh.image" .Values.gatewayService.image }}
+        imagePullPolicy: {{ .Values.gatewayService.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.gatewayService.port }}
+          protocol: TCP
+        env:
+        - name: SERVICE_NAME
+          value: {{ .Values.gatewayService.name }}
+        - name: PORT
+          value: {{ .Values.gatewayService.port | quote }}
+        - name: AUTH_SERVICE_URL
+          value: {{ include "quantum-safe-mesh.authServiceUrl" . }}
+        - name: BACKEND_SERVICE_URL
+          value: {{ include "quantum-safe-mesh.backendServiceUrl" . }}
+        resources:
+          {{- toYaml .Values.gatewayService.resources | nindent 10 }}
+        {{- if .Values.gatewayService.healthCheck.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.gatewayService.healthCheck.path }}
+            port: {{ .Values.gatewayService.port }}
+          initialDelaySeconds: {{ .Values.gatewayService.healthCheck.initialDelaySeconds }}
+          periodSeconds: {{ .Values.gatewayService.healthCheck.periodSeconds }}
+          timeoutSeconds: {{ .Values.gatewayService.healthCheck.timeoutSeconds }}
+          failureThreshold: {{ .Values.gatewayService.healthCheck.failureThreshold }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.gatewayService.healthCheck.path }}
+            port: {{ .Values.gatewayService.port }}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        {{- end }}
+        volumeMounts:
+        - name: keys-storage
+          mountPath: /root/keys
+      volumes:
+      - name: keys-storage
+        {{- if .Values.storage.persistent }}
+        persistentVolumeClaim:
+          claimName: {{ .Values.gatewayService.name }}-keys
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
+      {{- with .Values.gatewayService.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.gatewayService.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.gatewayService.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.gatewayService.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    app: {{ .Values.gatewayService.name }}
+    component: gateway
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+  {{- with .Values.gatewayService.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.gatewayService.service.type }}
+  ports:
+  - port: {{ .Values.gatewayService.service.port }}
+    targetPort: {{ .Values.gatewayService.port }}
+    protocol: TCP
+    name: http
+  selector:
+    app: {{ .Values.gatewayService.name }}
+    {{- include "quantum-safe-mesh.selectorLabels" . | nindent 4 }}
+{{- if .Values.gatewayService.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gateway-ingress
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    app: {{ .Values.gatewayService.name }}
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.gatewayService.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if .Values.gatewayService.ingress.className }}
+    kubernetes.io/ingress.class: {{ .Values.gatewayService.ingress.className }}
+    {{- end }}
+spec:
+  {{- if .Values.gatewayService.ingress.tls }}
+  tls:
+    {{- range .Values.gatewayService.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+  - host: {{ .Values.gatewayService.ingress.host | quote }}
+    http:
+      paths:
+      - path: {{ .Values.gatewayService.ingress.path }}
+        pathType: {{ .Values.gatewayService.ingress.pathType }}
+        backend:
+          service:
+            name: {{ .Values.gatewayService.name }}
+            port:
+              number: {{ .Values.gatewayService.service.port }}
+{{- end }}
+{{- end }}

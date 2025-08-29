@@ -1,0 +1,121 @@
+{{- if .Values.authService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.authService.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    app: {{ .Values.authService.name }}
+    component: auth
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.authService.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.authService.name }}
+      {{- include "quantum-safe-mesh.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.authService.name }}
+        component: auth
+        {{- include "quantum-safe-mesh.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/auth-service.yaml") . | sha256sum }}
+        {{- if .Values.monitoring.prometheus.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.authService.port | quote }}
+        prometheus.io/path: {{ .Values.monitoring.prometheus.path }}
+        {{- end }}
+        {{- with .Values.commonAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "quantum-safe-mesh.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.authService.securityContext | nindent 8 }}
+      containers:
+      - name: auth-service
+        image: {{ include "quantum-safe-mesh.image" .Values.authService.image }}
+        imagePullPolicy: {{ .Values.authService.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.authService.port }}
+          protocol: TCP
+        env:
+        - name: SERVICE_NAME
+          value: {{ .Values.authService.name }}
+        - name: PORT
+          value: {{ .Values.authService.port | quote }}
+        resources:
+          {{- toYaml .Values.authService.resources | nindent 10 }}
+        {{- if .Values.authService.healthCheck.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.authService.healthCheck.path }}
+            port: {{ .Values.authService.port }}
+          initialDelaySeconds: {{ .Values.authService.healthCheck.initialDelaySeconds }}
+          periodSeconds: {{ .Values.authService.healthCheck.periodSeconds }}
+          timeoutSeconds: {{ .Values.authService.healthCheck.timeoutSeconds }}
+          failureThreshold: {{ .Values.authService.healthCheck.failureThreshold }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.authService.healthCheck.path }}
+            port: {{ .Values.authService.port }}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        {{- end }}
+        volumeMounts:
+        - name: keys-storage
+          mountPath: /root/keys
+      volumes:
+      - name: keys-storage
+        {{- if .Values.storage.persistent }}
+        persistentVolumeClaim:
+          claimName: {{ .Values.authService.name }}-keys
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
+      {{- with .Values.authService.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.authService.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.authService.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.authService.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    app: {{ .Values.authService.name }}
+    component: auth
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.authService.service.type }}
+  ports:
+  - port: {{ .Values.authService.service.port }}
+    targetPort: {{ .Values.authService.port }}
+    protocol: TCP
+    name: http
+  selector:
+    app: {{ .Values.authService.name }}
+    {{- include "quantum-safe-mesh.selectorLabels" . | nindent 4 }}
+{{- end }}

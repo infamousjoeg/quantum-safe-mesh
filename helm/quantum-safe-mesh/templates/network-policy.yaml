@@ -1,0 +1,100 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: auth-service-netpol
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Values.authService.name }}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: {{ .Values.gatewayService.name }}
+    - podSelector:
+        matchLabels:
+          app: {{ .Values.backendService.name }}
+    - podSelector:
+        matchLabels:
+          app: {{ .Values.demoJob.name }}
+    ports:
+    - protocol: TCP
+      port: {{ .Values.authService.port }}
+  egress:
+  - {} # Allow all outbound for DNS and key generation
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-service-netpol
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Values.gatewayService.name }}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from: [] # Allow ingress from anywhere (LoadBalancer/Ingress)
+    ports:
+    - protocol: TCP
+      port: {{ .Values.gatewayService.port }}
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: {{ .Values.authService.name }}
+    ports:
+    - protocol: TCP
+      port: {{ .Values.authService.port }}
+  - to:
+    - podSelector:
+        matchLabels:
+          app: {{ .Values.backendService.name }}
+    ports:
+    - protocol: TCP
+      port: {{ .Values.backendService.port }}
+  - {} # Allow DNS resolution
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-service-netpol
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Values.backendService.name }}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: {{ .Values.gatewayService.name }}
+    ports:
+    - protocol: TCP
+      port: {{ .Values.backendService.port }}
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: {{ .Values.authService.name }}
+    ports:
+    - protocol: TCP
+      port: {{ .Values.authService.port }}
+  - {} # Allow DNS resolution
+{{- end }}

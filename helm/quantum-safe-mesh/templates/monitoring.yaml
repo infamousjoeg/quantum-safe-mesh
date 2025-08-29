@@ -1,0 +1,149 @@
+{{- if .Values.monitoring.enabled }}
+{{- if .Values.monitoring.prometheus.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "quantum-safe-mesh.fullname" . }}-metrics
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    app.kubernetes.io/name: {{ include "quantum-safe-mesh.name" . }}
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "quantum-safe-mesh.selectorLabels" . | nindent 6 }}
+  endpoints:
+  - port: http
+    path: {{ .Values.monitoring.prometheus.path }}
+    interval: 30s
+    scrapeTimeout: 10s
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'pqc_.*'
+      targetLabel: __tmp_pqc_metric
+      replacement: 'true'
+  - port: http
+    path: /health
+    interval: 15s
+    scrapeTimeout: 5s
+  namespaceSelector:
+    matchNames:
+    - {{ .Values.namespace.name }}
+{{- end }}
+
+{{- if .Values.monitoring.grafana.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "quantum-safe-mesh.fullname" . }}-grafana-dashboard
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "quantum-safe-mesh.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  quantum-safe-mesh.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Quantum-Safe Service Mesh - {{ .Release.Name }}",
+        "description": "Monitoring dashboard for Post-Quantum Cryptography Service Mesh",
+        "tags": ["quantum", "cryptography", "security", "kubernetes", "{{ .Release.Name }}"],
+        "style": "dark",
+        "timezone": "",
+        "refresh": "30s",
+        "schemaVersion": 27,
+        "version": 1,
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Service Health Status",
+            "type": "stat",
+            "datasource": "prometheus",
+            "fieldConfig": {
+              "defaults": {
+                "color": {"mode": "palette-classic"},
+                "unit": "short"
+              }
+            },
+            "targets": [
+              {
+                "expr": "up{namespace=\"{{ .Values.namespace.name }}\"}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Request Rate (req/sec)",
+            "type": "graph",
+            "datasource": "prometheus",
+            "targets": [
+              {
+                "expr": "rate(http_requests_total{namespace=\"{{ .Values.namespace.name }}\"}[5m])",
+                "legendFormat": "{{`{{service}}`}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 18, "x": 6, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "PQC Signature Operations/sec",
+            "type": "graph", 
+            "datasource": "prometheus",
+            "targets": [
+              {
+                "expr": "rate(pqc_signature_operations_total{namespace=\"{{ .Values.namespace.name }}\"}[5m])",
+                "legendFormat": "{{`{{operation}}`}} - {{`{{service}}`}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "Response Latency (95th percentile)",
+            "type": "graph",
+            "datasource": "prometheus",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{namespace=\"{{ .Values.namespace.name }}\"}[5m]))",
+                "legendFormat": "95th percentile - {{`{{service}}`}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+          },
+          {
+            "id": 5,
+            "title": "PQC Key Operations",
+            "type": "graph",
+            "datasource": "prometheus",
+            "targets": [
+              {
+                "expr": "rate(pqc_key_operations_total{namespace=\"{{ .Values.namespace.name }}\"}[5m])",
+                "legendFormat": "{{`{{algorithm}}`}} - {{`{{operation}}`}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+          },
+          {
+            "id": 6,
+            "title": "Error Rate",
+            "type": "graph",
+            "datasource": "prometheus",
+            "targets": [
+              {
+                "expr": "rate(http_requests_total{namespace=\"{{ .Values.namespace.name }}\",code!~\"2..\"}[5m])",
+                "legendFormat": "{{`{{code}}`}} - {{`{{service}}`}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+          }
+        ]
+      }
+    }
+{{- end }}
+{{- end }}

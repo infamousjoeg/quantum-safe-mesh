@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod init:*)",
+      "Bash(mkdir:*)",
+      "Bash(go mod:*)",
+      "Bash(go build:*)",
+      "Bash(chmod:*)",
+      "Bash(go doc:*)",
+      "Bash(go list:*)",
+      "Bash(go run:*)",
+      "Bash(make:*)",
+      "Bash(timeout:*)",
+      "Bash(/dev/null)",
+      "Bash(./scripts/deploy.sh:*)",
+      "Bash(./scripts/aws-deploy.sh:*)",
+      "Bash(go fmt:*)",
+      "Bash(go test:*)",
+      "Bash(terraform fmt:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

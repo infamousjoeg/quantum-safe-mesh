@@ -1,0 +1,113 @@
+apiVersion: v1
+kind: ServiceMonitor
+metadata:
+  name: quantum-safe-mesh-metrics
+  namespace: quantum-safe-mesh
+  labels:
+    app.kubernetes.io/name: quantum-safe-mesh
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: quantum-safe-mesh
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+  - port: http
+    path: /health
+    interval: 15s
+    scrapeTimeout: 5s
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quantum-safe-mesh-grafana-dashboard
+  namespace: quantum-safe-mesh
+  labels:
+    grafana_dashboard: "1"
+data:
+  quantum-safe-mesh.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Quantum-Safe Service Mesh",
+        "description": "Monitoring dashboard for Post-Quantum Cryptography Service Mesh",
+        "tags": ["quantum", "cryptography", "security", "kubernetes"],
+        "style": "dark",
+        "timezone": "",
+        "refresh": "30s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "title": "Service Health Status",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "up{job=\"quantum-safe-mesh\"}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Request Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(http_requests_total[5m])"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "PQC Signature Operations",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(pqc_signature_operations_total[5m])"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "Response Latency",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+          }
+        ]
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quantum-safe-mesh-metrics
+  namespace: quantum-safe-mesh
+  labels:
+    app.kubernetes.io/name: quantum-safe-mesh
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: quantum-safe-mesh

@@ -1,0 +1,105 @@
+# AWS-specific Helm values for Quantum-Safe Service Mesh
+
+# Global configuration
+global:
+  imageRegistry: "" # Will be populated by deployment script
+
+# Namespace
+namespace:
+  create: true
+  name: quantum-safe-mesh
+
+# Gateway Service - exposed via LoadBalancer for AWS
+gatewayService:
+  enabled: true
+  replicaCount: 2
+  service:
+    type: NodePort
+    port: 8081
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+      service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+  
+  ingress:
+    enabled: true
+    className: "nginx"
+    host: "quantum-safe-mesh.local" # Will be updated to use actual IP
+    path: "/"
+    pathType: Prefix
+    annotations:
+      nginx.ingress.kubernetes.io/rewrite-target: /
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+
+# Auth Service
+authService:
+  enabled: true
+  replicaCount: 2
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+
+# Backend Service
+backendService:
+  enabled: true
+  replicaCount: 2
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+
+# Demo Job
+demoJob:
+  enabled: true
+  backoffLimit: 2
+
+# Network Policies
+networkPolicy:
+  enabled: true
+  zeroTrust: true
+
+# Monitoring
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: false # Using external monitoring
+
+# Storage
+storage:
+  persistent: false # Using ephemeral storage for demo
+  
+# Security
+serviceAccount:
+  create: true
+  
+rbac:
+  create: true
+
+# Pod Security
+podSecurityPolicy:
+  enabled: false # Not needed for kind cluster
+
+# Common labels
+commonLabels:
+  environment: "aws"
+  deployment: "terraform"
+  
+# Common annotations
+commonAnnotations:
+  "deployment.kubernetes.io/revision": "1"

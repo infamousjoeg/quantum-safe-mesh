@@ -1,0 +1,41 @@
+# Multi-stage build for Backend Service
+FROM golang:1.21-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache gcc musl-dev
+
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the backend service
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o backend ./cmd/backend
+
+# Final stage
+FROM alpine:3.19
+
+# Install ca-certificates and curl for health checks
+RUN apk --no-cache add ca-certificates tzdata curl
+
+WORKDIR /root/
+
+# Copy the binary from builder stage
+COPY --from=builder /app/backend .
+
+# Create keys directory
+RUN mkdir -p /root/keys
+
+# Expose port
+EXPOSE 8082
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8082/health || exit 1
+
+# Run the backend service
+CMD ["./backend"]

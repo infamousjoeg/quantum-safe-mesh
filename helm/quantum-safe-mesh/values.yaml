@@ -1,0 +1,219 @@
+# Default values for quantum-safe-mesh
+# This is a YAML-formatted file.
+
+global:
+  # Global image registry
+  imageRegistry: ""
+  # Global image pull secrets
+  imagePullSecrets: []
+  # Global storage class
+  storageClass: ""
+
+# Common labels to add to all resources
+commonLabels: {}
+  # environment: production
+  # team: security
+
+# Common annotations to add to all resources  
+commonAnnotations: {}
+  # prometheus.io/scrape: "true"
+
+# Namespace configuration
+namespace:
+  create: true
+  name: quantum-safe-mesh
+  labels: {}
+  annotations: {}
+
+# Auth Service configuration
+authService:
+  enabled: true
+  name: auth-service
+  image:
+    registry: ""
+    repository: quantum-safe-mesh/auth
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  port: 8080
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
+  healthCheck:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  service:
+    type: ClusterIP
+    port: 8080
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop:
+        - ALL
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Gateway Service configuration
+gatewayService:
+  enabled: true
+  name: gateway-service
+  image:
+    registry: ""
+    repository: quantum-safe-mesh/gateway
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 3
+  port: 8081
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
+  healthCheck:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  service:
+    type: LoadBalancer
+    port: 8081
+    # annotations for cloud provider load balancer
+    annotations: {}
+  ingress:
+    enabled: true
+    className: nginx
+    host: quantum-safe-mesh.local
+    path: /
+    pathType: Prefix
+    annotations:
+      nginx.ingress.kubernetes.io/rewrite-target: /
+    tls: []
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop:
+        - ALL
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Backend Service configuration
+backendService:
+  enabled: true
+  name: backend-service
+  image:
+    registry: ""
+    repository: quantum-safe-mesh/backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  port: 8082
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
+  healthCheck:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  service:
+    type: ClusterIP
+    port: 8082
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop:
+        - ALL
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Demo Job configuration
+demoJob:
+  enabled: true
+  name: quantum-safe-demo
+  image:
+    registry: ""
+    repository: quantum-safe-mesh/demo
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "32Mi"
+      cpu: "10m"
+    limits:
+      memory: "64Mi"
+      cpu: "100m"
+  backoffLimit: 3
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop:
+        - ALL
+
+# Network Policy configuration
+networkPolicy:
+  enabled: true
+  # Enable zero-trust networking between services
+  zeroTrust: true
+
+# Monitoring configuration
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    port: 9090
+    path: /metrics
+  grafana:
+    enabled: false
+    # Grafana dashboard configurations
+    dashboards: {}
+
+# Storage configuration
+storage:
+  # Persistent storage for keys (optional)
+  persistent: false
+  storageClass: ""
+  size: "1Gi"
+  accessMode: ReadWriteOnce
+
+# Service Account configuration
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Pod Security Policy (if needed)
+podSecurityPolicy:
+  enabled: false
+
+# RBAC configuration
+rbac:
+  create: true

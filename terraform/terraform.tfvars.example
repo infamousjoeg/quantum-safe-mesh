@@ -1,0 +1,55 @@
+# Example Terraform Variables for Quantum-Safe Service Mesh on AWS
+# Copy this file to terraform.tfvars and customize for your environment
+
+# AWS Configuration
+aws_region = "us-west-2"
+environment = "dev"
+project_name = "quantum-safe-mesh"
+owner = "quantum-safe-team"
+
+# Network Configuration
+vpc_cidr = "10.0.0.0/16"
+allowed_cidr_blocks = [
+  "0.0.0.0/0"  # WARNING: Restrict this in production!
+  # "203.0.113.0/24",  # Your office IP range
+  # "198.51.100.0/24"  # Your home IP range
+]
+
+# EC2 Configuration
+instance_type = "t3.large"        # 2 vCPU, 8 GB RAM
+root_volume_size = 50             # GB
+
+# Services Configuration
+services = ["auth", "gateway", "backend", "demo"]
+
+# Monitoring Configuration
+enable_monitoring = true
+alert_email = ""  # Set your email for CloudWatch alerts
+# alert_email = "alerts@example.com"
+
+# Tool Versions
+kind_version = "v0.20.0"
+kubernetes_version = "v1.28.0"
+kubectl_version = "v1.28.0"
+helm_version = "v3.13.0"
+ingress_nginx_version = "v1.8.0"
+
+# Optional: Enable automated backups
+enable_backup = false
+
+# Example Production Configuration
+# -----------------------------------
+# aws_region = "us-east-1"
+# environment = "prod"
+# instance_type = "t3.xlarge"
+# root_volume_size = 100
+# allowed_cidr_blocks = ["10.0.0.0/8", "172.16.0.0/12"]
+# enable_monitoring = true
+# enable_backup = true
+# alert_email = "production-alerts@company.com"
+
+# Example Multi-Environment Setup
+# --------------------------------
+# Development:   environment = "dev",   instance_type = "t3.medium"
+# Staging:       environment = "stage", instance_type = "t3.large"
+# Production:    environment = "prod",  instance_type = "t3.xlarge"

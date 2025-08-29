@@ -1,0 +1,22 @@
+apiVersion: v2
+name: quantum-safe-mesh
+description: A Post-Quantum Cryptography Service Mesh Demo for Kubernetes
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://github.com/quantum-safe/mesh-demo
+sources:
+  - https://github.com/quantum-safe/mesh-demo
+maintainers:
+  - name: Quantum Safe Team
+    email: security@quantum-safe.io
+keywords:
+  - post-quantum
+  - cryptography
+  - security
+  - service-mesh
+  - kubernetes
+  - dilithium
+  - kyber
+annotations:
+  category: Security
+  licenses: Apache-2.0
