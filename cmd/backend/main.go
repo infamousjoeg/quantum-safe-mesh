@@ -129,25 +129,16 @@ func (bs *BackendService) getServicePublicKey(serviceID string) ([]byte, error) 
 		return nil, fmt.Errorf("failed to unmarshal key data: %w", err)
 	}
 
-	publicKeyBytes, ok := keyData["public_key"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid public key format")
-	}
-
-	pubKey := make([]byte, len(publicKeyBytes))
-	for i, v := range publicKeyBytes {
-		if b, ok := v.(float64); ok {
-			pubKey[i] = byte(b)
-		} else {
-			return nil, fmt.Errorf("invalid public key byte format")
-		}
+	publicKeyBytes, err := pqc.DeserializePublicKeyFromJSON(keyData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize public key: %w", err)
 	}
 
 	bs.mutex.Lock()
-	bs.publicKeyCache[serviceID] = pubKey
+	bs.publicKeyCache[serviceID] = publicKeyBytes
 	bs.mutex.Unlock()
 
-	return pubKey, nil
+	return publicKeyBytes, nil
 }
 
 func (bs *BackendService) verifyRequest(request models.ServiceRequest) error {

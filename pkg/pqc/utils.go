@@ -91,6 +91,42 @@ func LoadKeyPair(serviceID string) (*DilithiumKeyPair, *KyberKeyPair, error) {
 	return dilithiumKeyPair, kyberKeyPair, nil
 }
 
+// DeserializePublicKeyFromJSON converts a JSON-marshaled public key back to []byte.
+// When Go marshals []byte to JSON, it becomes an array of numbers ([]interface{}).
+// This function handles the conversion back to []byte for consistent key handling
+// across all services.
+func DeserializePublicKeyFromJSON(keyData map[string]interface{}) ([]byte, error) {
+	// Try to get the public_key field from the JSON data
+	publicKeyRaw, exists := keyData["public_key"]
+	if !exists {
+		return nil, fmt.Errorf("public_key field not found in response")
+	}
+
+	// Handle the case where JSON unmarshaling converts []byte to []interface{}
+	publicKeySlice, ok := publicKeyRaw.([]interface{})
+	if !ok {
+		// Fallback: try direct []byte (shouldn't happen with JSON, but be safe)
+		if directBytes, ok := publicKeyRaw.([]byte); ok {
+			return directBytes, nil
+		}
+		return nil, fmt.Errorf("invalid public key format: expected []interface{} but got %T", publicKeyRaw)
+	}
+
+	// Convert []interface{} (containing float64 values) back to []byte
+	pubKey := make([]byte, len(publicKeySlice))
+	for i, v := range publicKeySlice {
+		// JSON numbers are decoded as float64 by default
+		if byteVal, ok := v.(float64); ok {
+			pubKey[i] = byte(byteVal)
+		} else {
+			return nil, fmt.Errorf("invalid public key byte format at index %d: expected float64 but got %T", i, v)
+		}
+	}
+
+	log.Printf("🔄 Successfully deserialized public key (%d bytes) from JSON", len(pubKey))
+	return pubKey, nil
+}
+
 func BenchmarkRSAvsDialithium() {
 	log.Println("\n🚀 Performance Comparison: RSA vs Dilithium3")
 	log.Println(strings.Repeat("=", 50))
