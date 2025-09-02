@@ -180,10 +180,19 @@ func (gw *APIGateway) forwardToBackend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle empty request bodies for GET requests
+	var requestBody json.RawMessage
+	if len(body) == 0 {
+		// For empty bodies (like GET requests), use empty JSON object
+		requestBody = json.RawMessage("{}")
+	} else {
+		requestBody = json.RawMessage(body)
+	}
+
 	requestData := models.ServiceRequest{
 		ServiceID: gw.serviceID,
 		Timestamp: time.Now(),
-		Data:      body,
+		Data:      requestBody,
 		Headers:   make(map[string]string),
 	}
 
