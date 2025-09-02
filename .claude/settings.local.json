@@ -23,7 +23,10 @@
       "Bash(gh release create:*)",
       "Bash(docker build:*)",
       "Bash(gh issue view:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(pkill:*)",
+      "Bash(curl:*)",
+      "Bash(gh issue comment:*)"
     ],
     "deny": [],
     "ask": []
