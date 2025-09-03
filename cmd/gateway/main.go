@@ -130,9 +130,9 @@ func (gw *APIGateway) getServicePublicKey(serviceID string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to unmarshal key data: %w", err)
 	}
 
-	publicKeyBytes, ok := keyData["public_key"].([]byte)
-	if !ok {
-		return nil, fmt.Errorf("invalid public key format")
+	publicKeyBytes, err := pqc.DeserializePublicKeyFromJSON(keyData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize public key: %w", err)
 	}
 
 	gw.mutex.Lock()

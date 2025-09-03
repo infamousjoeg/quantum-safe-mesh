@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -89,6 +90,52 @@ func LoadKeyPair(serviceID string) (*DilithiumKeyPair, *KyberKeyPair, error) {
 
 	log.Printf("✅ Keys loaded for service %s", serviceID)
 	return dilithiumKeyPair, kyberKeyPair, nil
+}
+
+// DeserializePublicKeyFromJSON converts a JSON-marshaled public key back to []byte.
+// This function handles multiple formats that Go's JSON marshaling can produce:
+// 1. Base64-encoded string (most common with []byte JSON marshaling)
+// 2. Array of numbers ([]interface{} from JSON unmarshaling)
+// 3. Direct []byte (fallback, rarely occurs with JSON)
+func DeserializePublicKeyFromJSON(keyData map[string]interface{}) ([]byte, error) {
+	// Try to get the public_key field from the JSON data
+	publicKeyRaw, exists := keyData["public_key"]
+	if !exists {
+		return nil, fmt.Errorf("public_key field not found in response")
+	}
+
+	// Case 1: Base64-encoded string (most likely)
+	if keyString, ok := publicKeyRaw.(string); ok {
+		pubKey, err := base64.StdEncoding.DecodeString(keyString)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode base64 public key: %w", err)
+		}
+		log.Printf("🔄 Successfully deserialized public key (%d bytes) from base64 string", len(pubKey))
+		return pubKey, nil
+	}
+
+	// Case 2: Array of numbers ([]interface{} from JSON unmarshaling)
+	if publicKeySlice, ok := publicKeyRaw.([]interface{}); ok {
+		pubKey := make([]byte, len(publicKeySlice))
+		for i, v := range publicKeySlice {
+			// JSON numbers are decoded as float64 by default
+			if byteVal, ok := v.(float64); ok {
+				pubKey[i] = byte(byteVal)
+			} else {
+				return nil, fmt.Errorf("invalid public key byte format at index %d: expected float64 but got %T", i, v)
+			}
+		}
+		log.Printf("🔄 Successfully deserialized public key (%d bytes) from JSON array", len(pubKey))
+		return pubKey, nil
+	}
+
+	// Case 3: Direct []byte (fallback, shouldn't happen with JSON but be safe)
+	if directBytes, ok := publicKeyRaw.([]byte); ok {
+		log.Printf("🔄 Using direct byte slice for public key (%d bytes)", len(directBytes))
+		return directBytes, nil
+	}
+
+	return nil, fmt.Errorf("invalid public key format: expected string (base64), []interface{} (JSON array), or []byte, but got %T", publicKeyRaw)
 }
 
 func BenchmarkRSAvsDialithium() {
