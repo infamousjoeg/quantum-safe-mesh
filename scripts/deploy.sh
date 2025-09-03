@@ -90,6 +90,27 @@ create_kind_cluster() {
         return 0
     fi
     
+    # Check for port conflicts
+    log_info "Checking for port conflicts..."
+    local ports_in_use=()
+    for port in 8080 8081 8082 80 443; do
+        if lsof -i :$port &> /dev/null; then
+            ports_in_use+=($port)
+        fi
+    done
+    
+    if [ ${#ports_in_use[@]} -gt 0 ]; then
+        log_warning "The following ports are in use: ${ports_in_use[*]}"
+        log_warning "Kind cluster needs these ports for service access."
+        log_warning "Please stop services using these ports or they won't be accessible via localhost."
+        log_warning "Continue anyway? [y/N]"
+        read -r response
+        if [[ ! "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            log_info "Cancelled cluster creation"
+            return 1
+        fi
+    fi
+    
     log_info "Creating Kind cluster with port mappings..."
     
     # Create cluster configuration
@@ -190,7 +211,7 @@ load_images_kind() {
         
         for image in "${images[@]}"; do
             log_info "Loading quantum-safe-mesh/$image:$IMAGE_TAG into kind..."
-            kind load docker-image quantum-safe-mesh/$image:$IMAGE_TAG
+            kind load docker-image quantum-safe-mesh/$image:$IMAGE_TAG --name quantum-safe-mesh
         done
         
         log_success "All images loaded into kind cluster"

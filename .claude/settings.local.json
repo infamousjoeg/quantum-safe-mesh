@@ -33,7 +33,12 @@
       "Bash(git tag:*)",
       "Bash(git show:*)",
       "Bash(brew install:*)",
-      "Bash(open:*)"
+      "Bash(open:*)",
+      "Bash(lsof:*)",
+      "Bash(kill:*)",
+      "Bash(kubectl wait:*)",
+      "Bash(kubectl get:*)",
+      "Bash(kind delete:*)"
     ],
     "deny": [],
     "ask": []
