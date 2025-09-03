@@ -18,6 +18,12 @@ commonLabels: {}
 commonAnnotations: {}
   # prometheus.io/scrape: "true"
 
+# Kind cluster configuration
+kind:
+  # Enable Kind-specific configurations (NodePort services, etc.)
+  enabled: false
+  # Automatically detected if running in Kind cluster
+
 # Namespace configuration
 namespace:
   create: true
@@ -53,6 +59,8 @@ authService:
   service:
     type: ClusterIP
     port: 8080
+    # For Kind cluster - expose via NodePort
+    nodePort: 30080
   securityContext:
     allowPrivilegeEscalation: false
     runAsNonRoot: true
@@ -92,6 +100,8 @@ gatewayService:
   service:
     type: LoadBalancer
     port: 8081
+    # For Kind cluster - expose via NodePort  
+    nodePort: 30081
     # annotations for cloud provider load balancer
     annotations: {}
   ingress:
@@ -142,6 +152,8 @@ backendService:
   service:
     type: ClusterIP
     port: 8082
+    # For Kind cluster - expose via NodePort
+    nodePort: 30082
   securityContext:
     allowPrivilegeEscalation: false
     runAsNonRoot: true

@@ -57,13 +57,130 @@ check_prerequisites() {
         exit 1
     fi
     
+    log_success "All prerequisites satisfied"
+}
+
+check_cluster_connection() {
+    log_info "Checking cluster connection..."
+    
     # Check kubectl connection
     if ! kubectl cluster-info &> /dev/null; then
         log_error "Cannot connect to Kubernetes cluster"
         exit 1
     fi
     
-    log_success "All prerequisites satisfied"
+    log_success "Cluster connection verified"
+}
+
+create_kind_cluster() {
+    log_info "Setting up Kind cluster..."
+    
+    # Check if kind is available
+    if ! command -v kind &> /dev/null; then
+        log_error "Kind is not installed. Please install Kind first:"
+        log_error "  macOS: brew install kind"
+        log_error "  Linux: curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64 && chmod +x ./kind && sudo mv ./kind /usr/local/bin/"
+        exit 1
+    fi
+    
+    # Check if cluster already exists
+    if kind get clusters 2>/dev/null | grep -q "^quantum-safe-mesh$"; then
+        log_info "Kind cluster 'quantum-safe-mesh' already exists"
+        kubectl config use-context kind-quantum-safe-mesh
+        return 0
+    fi
+    
+    # Check for port conflicts
+    log_info "Checking for port conflicts..."
+    local ports_in_use=()
+    for port in 8080 8081 8082 80 443; do
+        if lsof -i :$port &> /dev/null; then
+            ports_in_use+=($port)
+        fi
+    done
+    
+    if [ ${#ports_in_use[@]} -gt 0 ]; then
+        log_warning "The following ports are in use: ${ports_in_use[*]}"
+        log_warning "Kind cluster needs these ports for service access."
+        log_warning "Please stop services using these ports or they won't be accessible via localhost."
+        log_warning "Continue anyway? [y/N]"
+        read -r response
+        if [[ ! "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            log_info "Cancelled cluster creation"
+            return 1
+        fi
+    fi
+    
+    log_info "Creating Kind cluster with port mappings..."
+    
+    # Create cluster configuration
+    cat << EOF | kind create cluster --name quantum-safe-mesh --config -
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: quantum-safe-mesh
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+  extraPortMappings:
+  # Auth Service
+  - containerPort: 30080
+    hostPort: 8080
+    protocol: TCP
+  # Gateway Service  
+  - containerPort: 30081
+    hostPort: 8081
+    protocol: TCP
+  # Backend Service
+  - containerPort: 30082
+    hostPort: 8082
+    protocol: TCP
+  # Ingress Controller
+  - containerPort: 80
+    hostPort: 80
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 443
+    protocol: TCP
+EOF
+    
+    if [ $? -eq 0 ]; then
+        log_success "Kind cluster 'quantum-safe-mesh' created successfully"
+        kubectl config use-context kind-quantum-safe-mesh
+    else
+        log_error "Failed to create Kind cluster"
+        exit 1
+    fi
+}
+
+setup_ingress_controller() {
+    log_info "Setting up NGINX Ingress Controller for Kind..."
+    
+    # Check if ingress controller is already installed
+    if kubectl get namespace ingress-nginx &> /dev/null; then
+        log_info "NGINX Ingress Controller already installed"
+        return 0
+    fi
+    
+    # Install NGINX Ingress Controller for Kind
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+    
+    # Wait for ingress controller to be ready
+    log_info "Waiting for ingress controller to be ready..."
+    kubectl wait --namespace ingress-nginx \
+        --for=condition=ready pod \
+        --selector=app.kubernetes.io/component=controller \
+        --timeout=90s
+    
+    if [ $? -eq 0 ]; then
+        log_success "NGINX Ingress Controller is ready"
+    else
+        log_warning "Ingress controller setup may have failed, but continuing..."
+    fi
 }
 
 build_images() {
@@ -94,7 +211,7 @@ load_images_kind() {
         
         for image in "${images[@]}"; do
             log_info "Loading quantum-safe-mesh/$image:$IMAGE_TAG into kind..."
-            kind load docker-image quantum-safe-mesh/$image:$IMAGE_TAG
+            kind load docker-image quantum-safe-mesh/$image:$IMAGE_TAG --name quantum-safe-mesh
         done
         
         log_success "All images loaded into kind cluster"
@@ -248,41 +365,75 @@ cleanup() {
     log_success "Cleanup completed"
 }
 
+cleanup_all() {
+    log_warning "Performing complete cleanup (including Kind cluster)..."
+    
+    # First do regular cleanup
+    cleanup
+    
+    # Check if Kind cluster exists and ask for confirmation
+    if command -v kind &> /dev/null && kind get clusters 2>/dev/null | grep -q "^quantum-safe-mesh$"; then
+        log_warning "Delete Kind cluster 'quantum-safe-mesh'? This will remove the entire local Kubernetes cluster. [y/N]"
+        read -r response
+        if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            log_info "Deleting Kind cluster..."
+            kind delete cluster --name quantum-safe-mesh
+            log_success "Kind cluster deleted"
+        else
+            log_info "Keeping Kind cluster intact"
+        fi
+    else
+        log_info "No Kind cluster found to clean up"
+    fi
+}
+
 print_help() {
     echo "Quantum-Safe Service Mesh Deployment Script"
     echo ""
     echo "Usage: $0 [command]"
     echo ""
     echo "Commands:"
-    echo "  build       Build Docker images"
-    echo "  deploy      Deploy using kubectl"
-    echo "  helm        Deploy using Helm"
-    echo "  demo        Run demonstration"
-    echo "  status      Show deployment status"
-    echo "  cleanup     Remove deployment"
-    echo "  all         Build, deploy, and run demo"
-    echo "  help        Show this help message"
+    echo "  build         Build Docker images"
+    echo "  deploy        Deploy using kubectl"
+    echo "  helm          Deploy using Helm"
+    echo "  demo          Run demonstration"
+    echo "  status        Show deployment status"
+    echo "  cleanup       Remove deployment"
+    echo "  cleanup-all   Remove deployment and Kind cluster"
+    echo "  kind-setup    Create Kind cluster with ingress"
+    echo "  all           Complete setup: Kind cluster + build + deploy + demo"
+    echo "  help          Show this help message"
     echo ""
     echo "Environment Variables:"
     echo "  DOCKER_REGISTRY   Docker registry prefix"
     echo "  IMAGE_TAG         Image tag (default: latest)"
     echo ""
     echo "Examples:"
-    echo "  $0 all                    # Complete deployment"
+    echo "  $0 all                    # Complete Kind deployment from scratch"
+    echo "  $0 kind-setup             # Create Kind cluster only"
     echo "  $0 build                  # Build images only"
-    echo "  $0 helm                   # Deploy with Helm"
-    echo "  IMAGE_TAG=v1.0 $0 deploy  # Deploy with specific tag"
+    echo "  $0 helm                   # Deploy with Helm to existing cluster"
+    echo "  $0 cleanup-all            # Remove everything including Kind cluster"
+    echo "  IMAGE_TAG=v1.0.1 $0 deploy # Deploy with specific tag"
+    echo ""
+    echo "Kind Cluster Features:"
+    echo "  - Single-node cluster optimized for local development"
+    echo "  - Port forwarding: Auth (8080), Gateway (8081), Backend (8082)"
+    echo "  - NGINX Ingress Controller included"
+    echo "  - Compatible with Docker Desktop for Mac"
 }
 
 # Main script logic
 case "${1:-help}" in
     "build")
         check_prerequisites
+        check_cluster_connection
         build_images
         load_images_kind
         ;;
     "deploy")
         check_prerequisites
+        check_cluster_connection
         build_images
         load_images_kind
         deploy_with_kubectl
@@ -290,22 +441,36 @@ case "${1:-help}" in
         ;;
     "helm")
         check_prerequisites
+        check_cluster_connection
         build_images
         load_images_kind
         deploy_with_helm
         show_status
         ;;
     "demo")
+        check_cluster_connection
         run_demo
         ;;
     "status")
+        check_cluster_connection
         show_status
         ;;
     "cleanup")
+        check_cluster_connection
         cleanup
+        ;;
+    "cleanup-all")
+        cleanup_all
+        ;;
+    "kind-setup")
+        check_prerequisites
+        create_kind_cluster
+        setup_ingress_controller
         ;;
     "all")
         check_prerequisites
+        create_kind_cluster
+        setup_ingress_controller
         build_images
         load_images_kind
         deploy_with_helm
