@@ -6,7 +6,7 @@ metadata:
   labels:
     app: gateway-service
     component: gateway
-    version: v1.0.0
+    version: v1.0.1
 spec:
   replicas: 3
   selector:
@@ -17,7 +17,7 @@ spec:
       labels:
         app: gateway-service
         component: gateway
-        version: v1.0.0
+        version: v1.0.1
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8081"
