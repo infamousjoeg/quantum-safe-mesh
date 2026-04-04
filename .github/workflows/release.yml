@@ -37,7 +37,7 @@ jobs:
     needs: test
     strategy:
       matrix:
-        service: [auth, gateway, backend]
+        service: [auth, gateway, backend, demo]
     steps:
       - uses: actions/checkout@v4
 

@@ -16,6 +16,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o demo-client ./dem
 # Final stage
 FROM alpine:3.19
 
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="quantum-safe-mesh-demo"
+LABEL org.opencontainers.image.description="Post-Quantum Cryptography Demo Client"
+LABEL org.opencontainers.image.source="https://github.com/infamousjoeg/quantum-safe-mesh"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
 # Install curl and jq for HTTP requests
 RUN apk --no-cache add ca-certificates curl jq
 
