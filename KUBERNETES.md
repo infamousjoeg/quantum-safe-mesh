@@ -157,6 +157,8 @@ spec:
     path: /metrics
 ```
 
+> **Built-in Prometheus metrics**: Each service exposes a `/metrics` endpoint with PQC operation counters (sign, verify, encrypt, decrypt, key exchange, replay rejections).
+
 ### Grafana Dashboard
 The Helm chart includes a pre-configured Grafana dashboard showing:
 - Service health status
@@ -235,7 +237,7 @@ gatewayService:
 kubectl port-forward svc/gateway-service 8081:8081 -n quantum-safe-mesh
 
 # Access demo
-curl http://localhost:8081/health
+curl -k https://localhost:8081/health
 ```
 
 ## 📈 Scaling
@@ -298,7 +300,7 @@ kubectl port-forward svc/gateway-service 8081:8081 -n quantum-safe-mesh &
 
 # Run load test
 for i in {1..100}; do
-  curl -X POST http://localhost:8081/echo \
+  curl -k -X POST https://localhost:8081/echo \
     -H "Content-Type: application/json" \
     -d '{"test":"load-'$i'"}' &
 done
@@ -326,7 +328,7 @@ kubectl run -it --rm debug --image=busybox --restart=Never -- \
 
 # Test service connectivity
 kubectl run -it --rm debug --image=curlimages/curl --restart=Never -- \
-  curl http://auth-service.quantum-safe-mesh.svc.cluster.local:8080/health
+  curl -k https://auth-service.quantum-safe-mesh.svc.cluster.local:8080/health
 ```
 
 #### PQC Key Generation Issues

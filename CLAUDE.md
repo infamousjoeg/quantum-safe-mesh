@@ -27,9 +27,10 @@ make run-auth        # Start Auth Service (port 8080)
 make run-gateway     # Start API Gateway (port 8081) 
 make run-backend     # Start Backend Service (port 8082)
 make demo           # Run complete demo flow
-make test           # Run unit tests
+make test            # Run 40 automated tests
 make benchmark      # PQC vs RSA performance comparison
 make clean          # Clean build artifacts and keys
+go test -bench=. ./pkg/pqc/  # Run PQC benchmarks
 ```
 
 ### Kubernetes Deployment
@@ -53,6 +54,10 @@ make clean          # Clean build artifacts and keys
 
 ### Key Packages
 - `pkg/pqc/`: Post-quantum cryptographic operations (Dilithium/Kyber)
+- `pkg/pqc/aead.go`: AES-256-GCM encryption using Kyber-derived shared secrets
+- `pkg/pqc/tlsgen.go`: Self-signed CA and TLS certificate generation
+- `pkg/pqc/metrics.go`: Prometheus-compatible operation counters
+- `pkg/pqc/logger.go`: Structured JSON logging via slog
 - `pkg/models/`: Shared data structures and types
 - `cmd/`: Service entry points (auth, gateway, backend)
 
@@ -62,17 +67,20 @@ make clean          # Clean build artifacts and keys
 - Go 1.22+ required
 
 ### Service Communication Flow
-1. Services register their public keys with Auth Service
-2. Gateway signs requests using Dilithium before forwarding to Backend
-3. Backend verifies Gateway signature using Auth Service public key registry
-4. Backend signs responses before returning to Gateway
-5. Gateway verifies Backend signature before responding to client
+1. Services register both Dilithium and Kyber public keys with Auth Service (registration is signed for proof of key ownership)
+2. Gateway performs pairwise Kyber768 key exchange with Backend to establish a shared AES-256-GCM encryption key
+3. Clients sign requests with Dilithium and send via TLS; Gateway verifies client signature
+4. Gateway encrypts request Data with shared secret, signs the full request, forwards over TLS
+5. Backend verifies Gateway signature, validates ±30s timestamp and nonce uniqueness, decrypts Data
+6. Backend encrypts response Data, signs response, returns over TLS
+7. Gateway verifies Backend signature, decrypts response Data, returns to client
 
 ### Key Management
 - Keys are generated automatically on first service startup
 - Key files are saved to `keys/` directory with service-specific names
 - Services load existing keys or generate new ones if not found
 - Use `make generate-keys` to pre-generate all service keys
+- Services communicate over TLS using self-signed certificates generated from a shared CA in the keys/ directory
 
 ## Testing and Validation
 
@@ -81,5 +89,7 @@ The system includes comprehensive testing endpoints:
 - Echo test: `POST /echo` through Gateway
 - Processing test: `POST /process` through Gateway
 - Status check: `GET /status` through Gateway
+- Prometheus metrics: `/metrics` on each service
+- Client authentication: all non-health requests require `X-Client-ID` and `X-Signature` headers
 
 All inter-service communication uses PQC signatures for authentication and integrity verification.

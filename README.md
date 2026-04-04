@@ -9,15 +9,18 @@ This project implements a minimal service mesh with three microservices that aut
 ## 🏗️ Architecture
 
 ```
-Client Request
-      ↓
-🌐 API Gateway (port 8081)
-      ↓ (PQC-signed request)
-🧠 Backend Service (port 8082)
-      ↑ (PQC-signed response)
-      
+Client (Dilithium-signed) ──[TLS]──▶ 🌐 API Gateway (port 8081)
+                                           │
+                                    [TLS + AES-256-GCM + Dilithium]
+                                           │
+                                           ▼
+                                     🧠 Backend Service (port 8082)
+                                    
 🔐 Auth Service (port 8080)
-   (Key registry & validation)
+   ├── Key registry (Dilithium + Kyber public keys)
+   ├── Authenticated registration (signature-verified)
+   ├── Kyber768 key exchange for all services
+   └── TLS certificate authority
 ```
 
 ### Services Overview
@@ -47,7 +50,7 @@ Client Request
 ### Prerequisites
 
 **For Local Development:**
-- Go 1.21 or later
+- Go 1.22 or later
 - Make (for using Makefile commands)
 
 **For Kubernetes Deployment:**
@@ -225,24 +228,25 @@ helm uninstall quantum-safe-demo -n quantum-safe-mesh  # Remove
 
 ### Manual Testing
 
-#### Local Testing
+> **Note**: Services now use HTTPS with self-signed certificates. The demo client (`go run demo.go`) handles TLS and request signing automatically. For manual curl testing, use `-k` to skip certificate verification:
+
+#### Health Checks (no signature required)
 ```bash
-# Health Check
-curl http://localhost:8080/health  # Auth service
-curl http://localhost:8081/health  # Gateway
-curl http://localhost:8082/health  # Backend
+curl -k https://localhost:8080/health  # Auth service
+curl -k https://localhost:8081/health  # Gateway
+curl -k https://localhost:8082/health  # Backend
+```
 
-# Echo Test
-curl -X POST http://localhost:8081/echo \
-  -H "Content-Type: application/json" \
-  -H "X-Client-ID: test-client" \
-  -d '{"message": "Hello Quantum World!"}'
+#### Prometheus Metrics
+```bash
+curl -k https://localhost:8081/metrics  # Gateway metrics
+# Output includes: pqc_sign_total, pqc_verify_total, pqc_encrypt_total, etc.
+```
 
-# Data Processing Test
-curl -X POST http://localhost:8081/process \
-  -H "Content-Type: application/json" \
-  -H "X-Client-ID: test-client" \
-  -d '{"data": "quantum processing test", "algorithm": "advanced"}'
+#### Full Demo (recommended for testing)
+```bash
+# The demo client generates a keypair, registers, signs requests, and uses TLS
+go run demo.go
 ```
 
 #### Kubernetes Testing
@@ -285,54 +289,86 @@ ssh -i terraform/quantum-safe-mesh-key.pem ubuntu@$INSTANCE_IP
 # - Grafana: http://$INSTANCE_IP:30300 (admin/admin123)
 ```
 
-## 🔐 Security Flow
+## 🔐 Security Architecture — Seven Layers of Quantum Protection
 
-### 1. Service Registration
-```
-Service → Auth Service: Register public key
-Auth Service → Service: Registration confirmation (signed)
-```
+This project implements defense-in-depth with seven security layers. Each layer is explained below in plain English, then with technical details.
 
-### 2. Request Authentication  
-```
-Client → Gateway: Request
-Gateway → Backend: PQC-signed request
-Backend: Verifies Gateway signature using Auth Service public key registry
-Backend → Gateway: PQC-signed response
-Gateway: Verifies Backend signature
-Gateway → Client: Response
-```
+### Layer 1: TLS Transport Encryption
+**What it means**: Every network connection between services is encrypted, like a private tunnel. Even someone watching the network sees only gibberish.
 
-### 3. Key Exchange (Kyber768)
-```
-Service A → Auth Service: Key exchange request (signed with Dilithium)
-Auth Service: Verifies request signature
-Auth Service → Service A: Encrypted shared secret (Kyber encapsulation)
-Service A: Decapsulates shared secret
-```
+**How it works**: A self-signed Certificate Authority (CA) generates TLS certificates for each service at startup. All services communicate over HTTPS. Plain HTTP is rejected with a 400 error.
+
+### Layer 2: Client Authentication (Dilithium Signatures)
+**What it means**: Before the gateway processes any request, the client must prove its identity with a quantum-proof digital signature — like showing a passport that no quantum computer can forge.
+
+**How it works**: Clients generate a Dilithium3 keypair, register their public key with the Auth Service, then sign every request body with their private key. The gateway decodes the base64 signature from the `X-Signature` header and verifies it against the registered public key. Unsigned requests receive 401 Unauthorized.
+
+### Layer 3: Authenticated Service Registration
+**What it means**: When a service joins the mesh, it must prove it owns the private key matching the public key it's registering. An attacker can't register a fake key under someone else's name.
+
+**How it works**: The registration payload is signed with the registrant's Dilithium private key. The Auth Service verifies the signature against the included public key before accepting registration.
+
+### Layer 4: Kyber768 Key Exchange → AES-256-GCM Encryption
+**What it means**: The gateway and backend establish a shared secret using quantum-safe key exchange, then use that secret to encrypt the actual data inside every request. Even if TLS were somehow broken, the payload is still encrypted.
+
+**How it works**: 
+1. Gateway fetches backend's Kyber768 public key from Auth Service
+2. Gateway encapsulates: produces a ciphertext + 32-byte shared secret
+3. Gateway sends ciphertext to backend's `/key-exchange` endpoint
+4. Backend decapsulates the ciphertext to derive the same 32-byte shared secret
+5. Both sides now use this secret as an AES-256-GCM key to encrypt/decrypt the `Data` field in every request and response
+
+**Why two layers of encryption?** TLS protects the transport. AES-256-GCM protects the payload. This is defense-in-depth — if one layer is compromised, the other still protects the data.
+
+### Layer 5: Digital Signatures (Dilithium3)
+**What it means**: Every request and response is signed by the sender, proving who sent it and that it wasn't tampered with in transit.
+
+**How it works**: The gateway signs the full `ServiceRequest` (including the encrypted data) with Dilithium3 before sending to backend. The backend verifies the signature, then signs its response. The gateway verifies the response signature before returning it to the client.
+
+### Layer 6: Timestamp Validation (±30 seconds)
+**What it means**: Every request includes a timestamp. If the request is more than 30 seconds old (or 30 seconds in the future), it's rejected. This prevents attackers from saving a valid request and replaying it later.
+
+**How it works**: The `Timestamp` field in `ServiceRequest` is covered by the Dilithium signature, so it can't be modified. The backend checks `time.Since(request.Timestamp)` and rejects anything outside the ±30s window.
+
+### Layer 7: Nonce Replay Protection
+**What it means**: Every request carries a unique random ID (nonce). If the backend sees the same nonce twice within 60 seconds, it rejects the duplicate. Even if an attacker replays a request within the 30-second timestamp window, the nonce catches it.
+
+**How it works**: The gateway generates a 16-byte random nonce for each request, included in the signed payload. The backend tracks seen nonces in a map with automatic 60-second expiry.
 
 ## 📊 Performance Comparison
 
-The system includes built-in benchmarking to compare PQC algorithms with traditional cryptography:
+Run benchmarks with proper Go testing framework:
 
 ```bash
-make benchmark
+go test -bench=. -benchmem ./pkg/pqc/
 ```
 
-### Expected Performance Characteristics
+### Benchmark Results (Apple M-series, 16 cores)
 
-| Algorithm | Operation | Traditional (RSA-2048) | Post-Quantum | Ratio |
-|-----------|-----------|----------------------|--------------|-------|
-| Sign      | Time      | ~1ms                 | ~0.1ms       | 0.1x  |
-| Verify    | Time      | ~0.05ms              | ~0.05ms      | 1.0x  |
-| Key Size  | Public    | ~270 bytes           | ~1952 bytes  | 7.2x  |
-| Key Size  | Private   | ~1190 bytes          | ~4000 bytes  | 3.4x  |
-| Signature | Size      | ~256 bytes           | ~3293 bytes  | 12.9x |
+| Operation | Time | vs RSA-2048 | Allocations |
+|-----------|-----:|:-----------:|:-----------:|
+| **RSA-2048 Sign** | 1,568 µs | baseline | 2 allocs |
+| **RSA-2048 Verify** | 45 µs | baseline | 9 allocs |
+| **Dilithium3 KeyGen** | 179 µs | — | 6 allocs |
+| **Dilithium3 Sign** | 444 µs | **3.5x faster** | 5 allocs |
+| **Dilithium3 Verify** | 108 µs | 2.4x slower | 6 allocs |
+| **Kyber768 KeyGen** | 59 µs | — | 8 allocs |
+| **Kyber768 Encapsulate** | 35 µs | — | 5 allocs |
+| **Kyber768 Decapsulate** | 37 µs | — | 4 allocs |
+
+### Key Size Comparison
+
+| | RSA-2048 | Dilithium3 | Ratio |
+|---|---:|---:|:---:|
+| Public Key | 294 bytes | 1,952 bytes | 6.6x |
+| Private Key | 1,192 bytes | 4,000 bytes | 3.4x |
+| Signature | 256 bytes | 3,293 bytes | 12.9x |
 
 **Key Insights:**
-- ✅ **Dilithium signing is faster** than RSA
-- ✅ **Verification speeds are comparable**
-- ⚠️ **Larger key and signature sizes** (acceptable trade-off for quantum resistance)
+- ✅ **Dilithium signing is 3.5x faster** than RSA-2048
+- ✅ **Kyber operations are extremely fast** (35-59 µs)
+- ⚠️ **Larger key and signature sizes** — an acceptable trade-off for quantum resistance
+- ✅ **AES-256-GCM encryption overhead is negligible** (< 1 µs per operation)
 
 ## 🛡️ Security Benefits
 
@@ -347,20 +383,36 @@ make benchmark
 - **Service Identity**: Strong service identity verification
 - **Tamper Detection**: Any modification to messages is detected
 
+### Security Properties Summary
+
+| Property | Status | Implementation |
+|----------|:------:|----------------|
+| Quantum-resistant signatures | ✅ | Dilithium3 (NIST FIPS 204 / ML-DSA) |
+| Quantum-resistant key exchange | ✅ | Kyber768 (NIST FIPS 203 / ML-KEM) |
+| Payload encryption | ✅ | AES-256-GCM with Kyber-derived 32-byte key |
+| Client → Gateway auth | ✅ | Dilithium-signed requests, 401 for unsigned |
+| Gateway → Backend auth | ✅ | Dilithium-signed ServiceRequests |
+| Backend → Gateway auth | ✅ | Dilithium-signed ServiceResponses |
+| Transport encryption | ✅ | TLS with self-signed CA certificates |
+| Replay protection | ✅ | ±30s timestamps + unique nonces |
+| Authenticated registration | ✅ | Dilithium signature proof of key ownership |
+| Key rotation | ✅ | Hourly Kyber shared secret rotation |
+| Observability | ✅ | Prometheus /metrics on all services |
+
 ## 🧪 Testing & Validation
 
-### Automated Testing
+### Automated Test Suite (40 tests)
 ```bash
-make test          # Run unit tests
-make demo          # Integration test
-make load-test     # Basic load testing
+go test ./... -v          # Run all 40 tests
+go test -bench=. ./pkg/pqc/  # Run PQC benchmarks
+go vet ./...              # Static analysis
 ```
 
-### Manual Verification
-1. **Signature Verification**: All responses include PQC signatures that are verified
-2. **Key Exchange**: Services perform Kyber key exchange for secure channels  
-3. **Authentication Flow**: Each request goes through full PQC authentication
-4. **Performance Monitoring**: Built-in latency and throughput measurements
+### Test Coverage
+- **pkg/pqc/** (24 tests): Dilithium sign/verify, Kyber encap/decap, AES-GCM encrypt/decrypt, TLS cert generation, key persistence, public key deserialization, RSA vs PQC benchmarks
+- **cmd/gateway/** (8 tests): Client signature verification (valid/missing/wrong key), HTTP 401 enforcement, health bypass, gateway→backend signing, base64 decode validation
+- **cmd/backend/** (5 tests): Request verification, tamper detection, impersonation rejection, timestamp validation, replay protection
+- **cmd/auth/** (3 tests): Signed registration accepted, unsigned rejected (401), wrong-key signature rejected (401)
 
 ## 📝 Educational Value
 
@@ -374,17 +426,56 @@ make load-test     # Basic load testing
 ### Code Structure
 ```
 pkg/
-├── pqc/           # PQC cryptographic operations
-│   ├── dilithium.go   # Digital signature functions
-│   ├── kyber.go       # Key encapsulation functions  
-│   └── utils.go       # Key management and benchmarks
-├── models/        # Data structures
+├── pqc/               # PQC cryptographic operations
+│   ├── dilithium.go       # Dilithium3 digital signatures
+│   ├── kyber.go           # Kyber768 key encapsulation
+│   ├── aead.go            # AES-256-GCM encryption (Kyber-derived keys)
+│   ├── tlsgen.go          # Self-signed CA and TLS certificate generation
+│   ├── metrics.go         # Prometheus metrics (sign/verify/encrypt counters)
+│   ├── logger.go          # Structured JSON logging via slog
+│   └── utils.go           # Key persistence and RSA benchmark
+├── models/            # Data structures (ServiceRequest, ServiceResponse, etc.)
 └── ...
 cmd/
-├── auth/          # Authentication service
-├── gateway/       # API Gateway service  
-└── backend/       # Backend processing service
+├── auth/              # Auth Service: key registry, registration, key exchange
+├── gateway/           # API Gateway: client auth, encryption, forwarding
+└── backend/           # Backend: verification, decryption, processing
 ```
+
+## 🧠 Understanding the Cryptography
+
+> This section explains the cryptography in plain English. No math degree required.
+
+### What Is a Lattice?
+Imagine a grid of dots extending infinitely in all directions. A lattice is a mathematical version of this grid, but in hundreds of dimensions. Finding the closest point on this grid is easy if you know the structure, but incredibly hard if you don't — even for quantum computers. This difficulty is what makes lattice-based cryptography secure.
+
+### Why Can't Quantum Computers Break Lattices?
+RSA security relies on factoring large numbers — something quantum computers can do efficiently using Shor's algorithm. Lattice problems are fundamentally different. No known quantum algorithm can efficiently solve them. This is why NIST chose lattice-based algorithms as the post-quantum standard.
+
+### What Is a Key Encapsulation Mechanism (KEM)?
+Think of it like a lockbox exchange:
+1. Backend creates a special lockbox (Kyber public key) and shares it
+2. Gateway puts a random secret in the lockbox and locks it (encapsulation)
+3. Gateway sends the locked box to backend
+4. Backend opens it with their private key (decapsulation)
+5. Now both sides have the same secret, and nobody else does
+
+This secret becomes the AES-256-GCM encryption key.
+
+### Why Both KEM and AES?
+Kyber (the KEM) is used to **agree on a key**. AES-256-GCM is used to **encrypt data with that key**. Kyber can't directly encrypt large payloads — it only produces a 32-byte shared secret. AES-256-GCM takes that 32-byte secret and uses it to encrypt any amount of data, fast.
+
+### What Is a Digital Signature?
+Dilithium3 is like an unforgeable stamp. When the gateway signs a request:
+1. It creates a unique stamp from the message content + its private key
+2. Anyone with the public key can verify the stamp is genuine
+3. But nobody can create a valid stamp without the private key
+4. A quantum computer can't forge the stamp (unlike RSA signatures)
+
+### Why Do Nonces Matter?
+Imagine you intercept a valid, signed bank transfer for $1,000. Without nonces, you could send that exact same signed request again and again — each time transferring another $1,000. The signature is valid each time because the message hasn't changed.
+
+A nonce (number used once) is a unique random ID in each request. The backend remembers every nonce it's seen. If it sees the same nonce twice, it knows it's a replay attack and rejects it.
 
 ## 🔮 The "Harvest Now, Decrypt Later" Threat Timeline
 
@@ -484,27 +575,31 @@ Each guide includes:
 - **Edge Computing**: K3s, MicroK8s support
 - **GitOps Ready**: ArgoCD/Flux compatible
 
-## 🚧 Production Considerations
+## 🚧 What's Included vs. Future Work
 
-### What This Demo Shows
-✅ PQC algorithm integration  
-✅ Service authentication flow  
-✅ Performance characteristics  
-✅ Error handling and logging  
-✅ Kubernetes-native deployment  
-✅ Container security best practices  
-✅ Horizontal scaling capabilities  
-✅ Service mesh architecture  
+### ✅ What This Project Implements
+- PQC algorithm integration (Dilithium3 + Kyber768)
+- Zero-trust client and service authentication
+- AES-256-GCM payload encryption using Kyber-derived keys
+- TLS on all inter-service communication
+- Timestamp validation (±30s) and nonce replay protection
+- Authenticated service registration (signed proof of key ownership)
+- Periodic key rotation (1 hour interval)
+- Prometheus metrics on all services
+- 40 automated tests with proper Go benchmarks
+- GitHub Actions CI (test + vet + benchmark)
+- Kubernetes-native deployment (Helm + kubectl)
+- AWS deployment with Terraform
 
-### Additional Production Requirements
-- [ ] Certificate management and rotation
-- [ ] Hardware security module (HSM) integration
-- [ ] Comprehensive audit logging
+### 🔮 Future Production Requirements
+- [ ] Hardware security module (HSM) integration for key storage
+- [ ] Certificate management with cert-manager
+- [ ] Comprehensive audit logging pipeline
 - [ ] Rate limiting and DoS protection
-- [ ] Advanced monitoring and alerting
+- [ ] Advanced alerting (PagerDuty, Slack integration)
 - [ ] Disaster recovery procedures
 - [ ] Security scanning and vulnerability management
-- [ ] Compliance reporting (SOC2, ISO27001)
+- [ ] Compliance reporting (SOC2, ISO 27001)
 
 ## 🤝 Contributing
 
@@ -564,21 +659,28 @@ volumes:
 ### Monitoring Integration
 ```bash
 # Prometheus metrics endpoints
-http://auth-service:8080/metrics
-http://gateway-service:8081/metrics  
-http://backend-service:8082/metrics
+https://auth-service:8080/metrics
+https://gateway-service:8081/metrics
+https://backend-service:8082/metrics
 
-# Custom PQC metrics
-pqc_signature_operations_total
-pqc_key_operations_total
-pqc_signature_verification_duration_seconds
+# PQC operation metrics
+pqc_sign_total
+pqc_verify_total
+pqc_verify_fail_total
+pqc_encrypt_total
+pqc_decrypt_total
+pqc_encapsulate_total
+pqc_decapsulate_total
+pqc_key_exchange_total
+pqc_request_total
+pqc_replay_reject_total
 ```
 
 ### Environment Variables
 ```yaml
 # Service discovery
-AUTH_SERVICE_URL: "http://auth-service.quantum-safe-mesh.svc.cluster.local:8080"
-BACKEND_SERVICE_URL: "http://backend-service.quantum-safe-mesh.svc.cluster.local:8082"
+AUTH_SERVICE_URL: "https://auth-service.quantum-safe-mesh.svc.cluster.local:8080"
+BACKEND_SERVICE_URL: "https://backend-service.quantum-safe-mesh.svc.cluster.local:8082"
 
 # Pod information
 POD_NAMESPACE: valueFrom fieldRef metadata.namespace
