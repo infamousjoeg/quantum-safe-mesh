@@ -47,8 +47,7 @@ type KeyExchangeRequest struct {
 }
 
 type KeyExchangeResponse struct {
-	Ciphertext   []byte    `json:"ciphertext"`
-	SharedSecret []byte    `json:"shared_secret,omitempty"`
-	Timestamp    time.Time `json:"timestamp"`
-	Signature    []byte    `json:"signature"`
+	Ciphertext []byte    `json:"ciphertext"`
+	Timestamp  time.Time `json:"timestamp"`
+	Signature  []byte    `json:"signature"`
 }

@@ -19,6 +19,7 @@ type AuthService struct {
 	kyberKeyPair     *pqc.KyberKeyPair
 	serviceRegistry  map[string][]byte // serviceID -> dilithium public key
 	kyberRegistry    map[string][]byte // serviceID -> kyber public key
+	sharedSecrets    map[string][]byte // serviceID -> 32-byte AES key from KEM
 	mutex            sync.RWMutex
 	serviceID        string
 }
@@ -51,6 +52,7 @@ func NewAuthService() (*AuthService, error) {
 		kyberKeyPair:     kyberKeyPair,
 		serviceRegistry:  make(map[string][]byte),
 		kyberRegistry:    make(map[string][]byte),
+		sharedSecrets:    make(map[string][]byte),
 		serviceID:        serviceID,
 	}
 
@@ -262,7 +264,7 @@ func (as *AuthService) keyExchange(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("✅ Key exchange timestamp valid (age: %v)", age)
 
-	ciphertext, _, err := pqc.EncapsulateWithPublicKey(request.KyberPublicKey)
+	ciphertext, sharedSecret, err := pqc.EncapsulateWithPublicKey(request.KyberPublicKey)
 	if err != nil {
 		log.Printf("❌ Failed to encapsulate: %v", err)
 		http.Error(w, "Encapsulation failed", http.StatusInternalServerError)
@@ -284,7 +286,12 @@ func (as *AuthService) keyExchange(w http.ResponseWriter, r *http.Request) {
 
 	response.Signature = signature
 
-	log.Printf("✅ Key exchange completed with service: %s", request.ServiceID)
+	// Store the shared secret for potential future encrypted communication
+	as.mutex.Lock()
+	as.sharedSecrets[request.ServiceID] = sharedSecret
+	as.mutex.Unlock()
+
+	log.Printf("✅ Key exchange completed with service: %s (shared secret: %d bytes)", request.ServiceID, len(sharedSecret))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)

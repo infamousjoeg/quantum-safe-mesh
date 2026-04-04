@@ -281,23 +281,25 @@ func (bs *BackendService) verifyRequest(request models.ServiceRequest) (models.S
 		return request, fmt.Errorf("signature verification failed: %w", err)
 	}
 
-	// Check for replay: reject duplicate nonces
-	if request.Nonce != "" {
-		bs.mutex.Lock()
-		// Clean up expired nonces (older than 60s)
-		for n, t := range bs.seenNonces {
-			if time.Since(t) > 60*time.Second {
-				delete(bs.seenNonces, n)
-			}
-		}
-		if _, seen := bs.seenNonces[request.Nonce]; seen {
-			bs.mutex.Unlock()
-			return request, fmt.Errorf("replay detected: duplicate nonce %s", request.Nonce)
-		}
-		bs.seenNonces[request.Nonce] = time.Now()
-		bs.mutex.Unlock()
-		log.Printf("✅ Nonce accepted: %s", request.Nonce)
+	// Replay protection: nonce is mandatory
+	if request.Nonce == "" {
+		return request, fmt.Errorf("missing nonce: replay protection requires a nonce")
 	}
+
+	bs.mutex.Lock()
+	// Clean up expired nonces (older than 60s)
+	for n, t := range bs.seenNonces {
+		if time.Since(t) > 60*time.Second {
+			delete(bs.seenNonces, n)
+		}
+	}
+	if _, seen := bs.seenNonces[request.Nonce]; seen {
+		bs.mutex.Unlock()
+		return request, fmt.Errorf("replay detected: duplicate nonce %s", request.Nonce)
+	}
+	bs.seenNonces[request.Nonce] = time.Now()
+	bs.mutex.Unlock()
+	log.Printf("✅ Nonce accepted: %s", request.Nonce)
 
 	log.Printf("✅ Request verified successfully from service: %s", request.ServiceID)
 
