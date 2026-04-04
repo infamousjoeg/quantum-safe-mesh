@@ -19,6 +19,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o gateway ./cmd/gat
 # Final stage
 FROM alpine:3.19
 
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="quantum-safe-mesh-gateway"
+LABEL org.opencontainers.image.description="Post-Quantum Cryptography Gateway Service"
+LABEL org.opencontainers.image.source="https://github.com/infamousjoeg/quantum-safe-mesh"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
 # Install ca-certificates and curl for health checks
 RUN apk --no-cache add ca-certificates tzdata curl
 
@@ -26,6 +33,7 @@ WORKDIR /root/
 
 # Copy the binary from builder stage
 COPY --from=builder /app/gateway .
+RUN chmod +x ./gateway
 
 # Create keys directory
 RUN mkdir -p /root/keys

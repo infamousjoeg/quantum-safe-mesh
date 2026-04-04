@@ -1,4 +1,4 @@
-.PHONY: help generate-keys run-auth run-gateway run-backend demo clean build-all stop-services benchmark test k8s-build k8s-deploy k8s-helm k8s-demo k8s-status k8s-cleanup
+.PHONY: help generate-keys run-auth run-gateway run-backend demo clean build-all stop-services benchmark test k8s-build k8s-deploy k8s-helm k8s-demo k8s-status k8s-cleanup release-tag
 
 help:
 	@echo "Quantum-Safe Service Mesh Demo - Available Commands:"
@@ -39,6 +39,9 @@ help:
 	@echo "Performance Commands:"
 	@echo "  make benchmark        - Run PQC vs RSA performance comparison"
 	@echo "  make load-test        - Run basic load test"
+	@echo ""
+	@echo "Release Commands:"
+	@echo "  make release-tag VERSION=v2.0.0 - Create and push a release tag"
 	@echo ""
 	@echo "Utility Commands:"
 	@echo "  make test             - Run tests"
@@ -258,3 +261,12 @@ aws-destroy:
 aws-all:
 	@echo "🌩️ Complete AWS deployment..."
 	@./scripts/aws-deploy.sh all
+
+# Release Commands
+release-tag:
+	@if [ -z "$(VERSION)" ]; then echo "Usage: make release-tag VERSION=v2.0.0"; exit 1; fi
+	@if ! echo "$(VERSION)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$'; then echo "Error: VERSION must be semver (e.g., v2.0.0)"; exit 1; fi
+	@echo "Creating release tag $(VERSION)..."
+	@git tag -a $(VERSION) -m "Release $(VERSION)"
+	@git push origin $(VERSION)
+	@echo "Tag $(VERSION) pushed. GitHub Actions will build and publish the release."

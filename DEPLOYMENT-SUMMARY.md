@@ -18,7 +18,7 @@ make demo
 ```
 
 **Access**: 
-- Gateway: http://localhost:8081
+- Gateway: https://localhost:8081
 - Direct services: 8080, 8081, 8082
 
 ## ☸️ Kubernetes (Local)
@@ -36,7 +36,7 @@ make k8s-all
 
 **Access**:
 - Port-forward: `kubectl port-forward svc/gateway-service 8081:8081`
-- Gateway: http://localhost:8081
+- Gateway: https://localhost:8081
 
 ## 🌩️ AWS Cloud Deployment
 
@@ -52,7 +52,7 @@ make aws-all
 ```
 
 **Access**:
-- Gateway: http://INSTANCE_IP:8081
+- Gateway: https://INSTANCE_IP:8081
 - SSH: `ssh -i key.pem ubuntu@INSTANCE_IP`
 - Monitoring: CloudWatch Dashboard
 
@@ -68,7 +68,7 @@ make aws-all
 | **Security** | Development | Network policies | VPC + Security groups |
 | **Persistence** | File system | ConfigMaps/Secrets | EBS volumes |
 | **Load Balancing** | None | Kubernetes Services | AWS ALB |
-| **SSL/TLS** | None | Cert-manager | ACM integration |
+| **SSL/TLS** | Self-signed CA | Cert-manager | ACM integration |
 | **Backup** | Manual | Velero | EBS snapshots |
 | **High Availability** | No | Multi-replica | Multi-AZ ready |
 
@@ -165,8 +165,11 @@ export ALERT_EMAIL="alerts@company.com"
 ## 🔒 Security Progression
 
 ### Local (Development)
-- Basic PQC implementation
-- No network security
+- TLS transport encryption (self-signed CA in keys/ directory)
+- Client authentication (Dilithium-signed requests via `X-Client-ID` / `X-Signature` headers)
+- Payload encryption (AES-256-GCM with Kyber768-derived shared secrets)
+- Timestamp (±30 s) and nonce replay protection
+- Authenticated service registration (signed proof of key ownership)
 - File-based key storage
 
 ### Kubernetes (Testing)

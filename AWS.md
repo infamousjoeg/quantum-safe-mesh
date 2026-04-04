@@ -173,8 +173,8 @@ terraform output
 - **SNS Alerts**: Email notifications for critical issues
 
 ### Application Monitoring
-- **Prometheus**: http://INSTANCE_IP:30090
-- **Grafana**: http://INSTANCE_IP:30300 (admin/admin123)
+- **Prometheus**: https://INSTANCE_IP:30090
+- **Grafana**: https://INSTANCE_IP:30300 (admin/admin123)
 - **PQC Metrics**: Custom metrics for quantum-safe operations
 
 ### Log Sources
@@ -189,12 +189,12 @@ After deployment, you'll have access to:
 
 ```bash
 # Service URLs
-Gateway Service: http://INSTANCE_IP:8081
+Gateway Service: https://INSTANCE_IP:8081
 Kubernetes API: https://INSTANCE_IP:6443
 
 # Monitoring
-Prometheus: http://INSTANCE_IP:30090
-Grafana: http://INSTANCE_IP:30300
+Prometheus: https://INSTANCE_IP:30090
+Grafana: https://INSTANCE_IP:30300
 CloudWatch: AWS Console → CloudWatch
 
 # SSH Access
@@ -206,7 +206,7 @@ ssh -i quantum-safe-mesh-key.pem ubuntu@INSTANCE_IP
 ### Health Checks
 ```bash
 # Check instance status
-curl http://INSTANCE_IP:8081/health
+curl -k https://INSTANCE_IP:8081/health
 
 # Check all services
 ./scripts/aws-deploy.sh test
@@ -215,17 +215,17 @@ curl http://INSTANCE_IP:8081/health
 ### PQC Tests
 ```bash
 # Echo test
-curl -X POST http://INSTANCE_IP:8081/echo \
+curl -k -X POST https://INSTANCE_IP:8081/echo \
   -H "Content-Type: application/json" \
   -d '{"message": "AWS PQC test"}'
 
 # Processing test
-curl -X POST http://INSTANCE_IP:8081/process \
+curl -k -X POST https://INSTANCE_IP:8081/process \
   -H "Content-Type: application/json" \
   -d '{"data": "quantum processing on AWS"}'
 
 # Status check
-curl http://INSTANCE_IP:8081/status
+curl -k https://INSTANCE_IP:8081/status
 ```
 
 ### Kubernetes Operations
@@ -264,6 +264,8 @@ kubectl logs deployment/gateway-service -n quantum-safe-mesh
 - **Pod Security**: Non-root containers with dropped capabilities
 - **Secrets**: Kubernetes secrets for sensitive data
 - **TLS**: HTTPS/TLS for all external communication
+
+> **Built-in TLS**: All inter-service communication uses TLS with self-signed certificates. The Auth Service acts as a Certificate Authority. No additional TLS configuration is required.
 
 ## 💰 Cost Optimization
 
@@ -369,7 +371,7 @@ kubectl logs -f deployment/auth-service -n quantum-safe-mesh
 ./scripts/aws-deploy.sh info
 
 # Service health
-curl -f http://INSTANCE_IP:8081/health
+curl -k -f https://INSTANCE_IP:8081/health
 
 # Cluster status
 ssh -i key.pem ubuntu@INSTANCE_IP 'kubectl get pods -A'

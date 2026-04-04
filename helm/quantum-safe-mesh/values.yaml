@@ -3,7 +3,7 @@
 
 global:
   # Global image registry
-  imageRegistry: ""
+  imageRegistry: "ghcr.io"
   # Global image pull secrets
   imagePullSecrets: []
   # Global storage class
@@ -18,9 +18,15 @@ commonLabels: {}
 commonAnnotations: {}
   # prometheus.io/scrape: "true"
 
+# Kind cluster configuration
+kind:
+  # Enable Kind-specific configurations (NodePort services, etc.)
+  enabled: false
+  # Automatically detected if running in Kind cluster
+
 # Namespace configuration
 namespace:
-  create: true
+  create: false
   name: quantum-safe-mesh
   labels: {}
   annotations: {}
@@ -30,8 +36,8 @@ authService:
   enabled: true
   name: auth-service
   image:
-    registry: ""
-    repository: quantum-safe-mesh/auth
+    registry: "ghcr.io"
+    repository: infamousjoeg/quantum-safe-mesh/auth
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 2
@@ -53,6 +59,8 @@ authService:
   service:
     type: ClusterIP
     port: 8080
+    # For Kind cluster - expose via NodePort
+    nodePort: 30080
   securityContext:
     allowPrivilegeEscalation: false
     runAsNonRoot: true
@@ -69,8 +77,8 @@ gatewayService:
   enabled: true
   name: gateway-service
   image:
-    registry: ""
-    repository: quantum-safe-mesh/gateway
+    registry: "ghcr.io"
+    repository: infamousjoeg/quantum-safe-mesh/gateway
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 3
@@ -92,6 +100,8 @@ gatewayService:
   service:
     type: LoadBalancer
     port: 8081
+    # For Kind cluster - expose via NodePort  
+    nodePort: 30081
     # annotations for cloud provider load balancer
     annotations: {}
   ingress:
@@ -119,8 +129,8 @@ backendService:
   enabled: true
   name: backend-service
   image:
-    registry: ""
-    repository: quantum-safe-mesh/backend
+    registry: "ghcr.io"
+    repository: infamousjoeg/quantum-safe-mesh/backend
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 2
@@ -142,6 +152,8 @@ backendService:
   service:
     type: ClusterIP
     port: 8082
+    # For Kind cluster - expose via NodePort
+    nodePort: 30082
   securityContext:
     allowPrivilegeEscalation: false
     runAsNonRoot: true
@@ -158,8 +170,8 @@ demoJob:
   enabled: true
   name: quantum-safe-demo
   image:
-    registry: ""
-    repository: quantum-safe-mesh/demo
+    registry: "ghcr.io"
+    repository: infamousjoeg/quantum-safe-mesh/demo
     tag: latest
     pullPolicy: IfNotPresent
   resources:

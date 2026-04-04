@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,6 +18,8 @@ type AuthService struct {
 	dilithiumKeyPair *pqc.DilithiumKeyPair
 	kyberKeyPair     *pqc.KyberKeyPair
 	serviceRegistry  map[string][]byte // serviceID -> dilithium public key
+	kyberRegistry    map[string][]byte // serviceID -> kyber public key
+	sharedSecrets    map[string][]byte // serviceID -> 32-byte AES key from KEM
 	mutex            sync.RWMutex
 	serviceID        string
 }
@@ -48,6 +51,8 @@ func NewAuthService() (*AuthService, error) {
 		dilithiumKeyPair: dilithiumKeyPair,
 		kyberKeyPair:     kyberKeyPair,
 		serviceRegistry:  make(map[string][]byte),
+		kyberRegistry:    make(map[string][]byte),
+		sharedSecrets:    make(map[string][]byte),
 		serviceID:        serviceID,
 	}
 
@@ -67,8 +72,34 @@ func (as *AuthService) registerService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify the registration is signed by the owner of the public key
+	if len(keyPair.Signature) == 0 {
+		log.Printf("❌ Registration rejected: missing signature from %s", keyPair.ServiceID)
+		http.Error(w, "Registration must be signed", http.StatusUnauthorized)
+		return
+	}
+
+	// Reconstruct payload without signature for verification
+	verifyData := models.ServiceKeyPair{
+		ServiceID:      keyPair.ServiceID,
+		PublicKey:       keyPair.PublicKey,
+		KyberPublicKey: keyPair.KyberPublicKey,
+	}
+	verifyPayload, _ := json.Marshal(verifyData)
+
+	if err := pqc.VerifyDilithiumSignature(keyPair.PublicKey, verifyPayload, keyPair.Signature); err != nil {
+		log.Printf("❌ Registration signature invalid from %s: %v", keyPair.ServiceID, err)
+		http.Error(w, "Invalid registration signature", http.StatusUnauthorized)
+		return
+	}
+
+	log.Printf("✅ Registration signature verified for %s", keyPair.ServiceID)
+
 	as.mutex.Lock()
 	as.serviceRegistry[keyPair.ServiceID] = keyPair.PublicKey
+	if len(keyPair.KyberPublicKey) > 0 {
+		as.kyberRegistry[keyPair.ServiceID] = keyPair.KyberPublicKey
+	}
 	as.mutex.Unlock()
 
 	log.Printf("✅ Service registered: %s (public key size: %d bytes)",
@@ -145,6 +176,50 @@ func (as *AuthService) getPublicKey(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(signedResponse)
 }
 
+func (as *AuthService) getKyberPublicKey(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	serviceID := vars["serviceID"]
+
+	log.Printf("🔍 Kyber public key request for service: %s", serviceID)
+
+	as.mutex.RLock()
+	kyberPublicKey, exists := as.kyberRegistry[serviceID]
+	as.mutex.RUnlock()
+
+	if !exists {
+		log.Printf("❌ Kyber public key not found for service: %s", serviceID)
+		http.Error(w, "Kyber public key not found", http.StatusNotFound)
+		return
+	}
+
+	response := map[string]interface{}{
+		"service_id":       serviceID,
+		"kyber_public_key": kyberPublicKey,
+		"timestamp":        time.Now(),
+	}
+
+	responseData, _ := json.Marshal(response)
+	signature, err := as.dilithiumKeyPair.Sign(responseData)
+	if err != nil {
+		log.Printf("❌ Failed to sign response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	signedResponse := models.ServiceResponse{
+		ServiceID: as.serviceID,
+		Timestamp: time.Now(),
+		Data:      responseData,
+		Signature: signature,
+		Success:   true,
+	}
+
+	log.Printf("✅ Kyber public key provided for service: %s", serviceID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(signedResponse)
+}
+
 func (as *AuthService) keyExchange(w http.ResponseWriter, r *http.Request) {
 	log.Println("🔐 Received key exchange request")
 
@@ -177,7 +252,19 @@ func (as *AuthService) keyExchange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ciphertext, _, err := pqc.EncapsulateWithPublicKey(request.KyberPublicKey)
+	// Validate timestamp freshness (±30s window)
+	age := time.Since(request.Timestamp)
+	if age < 0 {
+		age = -age
+	}
+	if age > 30*time.Second {
+		log.Printf("❌ Key exchange request timestamp too old: %v", age)
+		http.Error(w, "Request timestamp expired", http.StatusUnauthorized)
+		return
+	}
+	log.Printf("✅ Key exchange timestamp valid (age: %v)", age)
+
+	ciphertext, sharedSecret, err := pqc.EncapsulateWithPublicKey(request.KyberPublicKey)
 	if err != nil {
 		log.Printf("❌ Failed to encapsulate: %v", err)
 		http.Error(w, "Encapsulation failed", http.StatusInternalServerError)
@@ -199,7 +286,12 @@ func (as *AuthService) keyExchange(w http.ResponseWriter, r *http.Request) {
 
 	response.Signature = signature
 
-	log.Printf("✅ Key exchange completed with service: %s", request.ServiceID)
+	// Store the shared secret for potential future encrypted communication
+	as.mutex.Lock()
+	as.sharedSecrets[request.ServiceID] = sharedSecret
+	as.mutex.Unlock()
+
+	log.Printf("✅ Key exchange completed with service: %s (shared secret: %d bytes)", request.ServiceID, len(sharedSecret))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -242,25 +334,44 @@ func (as *AuthService) listServices(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	pqc.BenchmarkRSAvsDialithium()
-
 	authService, err := NewAuthService()
 	if err != nil {
 		log.Fatalf("Failed to create auth service: %v", err)
 	}
 
+	// Generate TLS certificates
+	caCert, caKey, _, err := pqc.GenerateCA("keys")
+	if err != nil {
+		log.Fatalf("Failed to generate CA: %v", err)
+	}
+	tlsCert, err := pqc.GenerateServiceCert("keys", "auth-service", caCert, caKey)
+	if err != nil {
+		log.Fatalf("Failed to generate TLS cert: %v", err)
+	}
+	log.Println("✅ TLS certificates ready")
+
 	r := mux.NewRouter()
 
 	r.HandleFunc("/register", authService.registerService).Methods("POST")
 	r.HandleFunc("/public-key/{serviceID}", authService.getPublicKey).Methods("GET")
+	r.HandleFunc("/public-kyber-key/{serviceID}", authService.getKyberPublicKey).Methods("GET")
 	r.HandleFunc("/key-exchange", authService.keyExchange).Methods("POST")
 	r.HandleFunc("/services", authService.listServices).Methods("GET")
+	r.HandleFunc("/metrics", pqc.MetricsHandler()).Methods("GET")
 
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}).Methods("GET")
 
-	log.Println("🌟 Auth Service starting on :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+	}
+	server := &http.Server{
+		Addr:      ":8080",
+		Handler:   r,
+		TLSConfig: tlsConfig,
+	}
+	log.Println("🌟 Auth Service starting on :8080 (TLS)")
+	log.Fatal(server.ListenAndServeTLS("", ""))
 }

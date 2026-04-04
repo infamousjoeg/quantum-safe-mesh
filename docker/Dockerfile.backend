@@ -19,6 +19,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o backend ./cmd/bac
 # Final stage
 FROM alpine:3.19
 
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="quantum-safe-mesh-backend"
+LABEL org.opencontainers.image.description="Post-Quantum Cryptography Backend Service"
+LABEL org.opencontainers.image.source="https://github.com/infamousjoeg/quantum-safe-mesh"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
 # Install ca-certificates and curl for health checks
 RUN apk --no-cache add ca-certificates tzdata curl
 
@@ -26,6 +33,7 @@ WORKDIR /root/
 
 # Copy the binary from builder stage
 COPY --from=builder /app/backend .
+RUN chmod +x ./backend
 
 # Create keys directory
 RUN mkdir -p /root/keys

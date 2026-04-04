@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	crand "crypto/rand"
+	"crypto/tls"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +19,12 @@ import (
 	"quantum-safe-mesh/pkg/models"
 	"quantum-safe-mesh/pkg/pqc"
 )
+
+func generateNonce() string {
+	b := make([]byte, 16)
+	crand.Read(b)
+	return hex.EncodeToString(b)
+}
 
 func getEnvOrDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
@@ -30,7 +40,9 @@ type APIGateway struct {
 	authServiceURL    string
 	backendServiceURL string
 	publicKeyCache    map[string][]byte
+	sharedSecrets     map[string][]byte // serviceID -> 32-byte AES key
 	mutex             sync.RWMutex
+	tlsClient         *http.Client
 }
 
 func NewAPIGateway() (*APIGateway, error) {
@@ -60,10 +72,22 @@ func NewAPIGateway() (*APIGateway, error) {
 		dilithiumKeyPair:  dilithiumKeyPair,
 		kyberKeyPair:      kyberKeyPair,
 		serviceID:         serviceID,
-		authServiceURL:    getEnvOrDefault("AUTH_SERVICE_URL", "http://localhost:8080"),
-		backendServiceURL: getEnvOrDefault("BACKEND_SERVICE_URL", "http://localhost:8082"),
+		authServiceURL:    getEnvOrDefault("AUTH_SERVICE_URL", "https://localhost:8080"),
+		backendServiceURL: getEnvOrDefault("BACKEND_SERVICE_URL", "https://localhost:8082"),
 		publicKeyCache:    make(map[string][]byte),
+		sharedSecrets:     make(map[string][]byte),
 	}
+
+	// Setup TLS client
+	_, _, caCertPEM, err := pqc.GenerateCA("keys")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load CA: %w", err)
+	}
+	tlsConf := pqc.NewTLSClient(caCertPEM)
+	gw.tlsClient = &http.Client{
+		Transport: &http.Transport{TLSClientConfig: tlsConf},
+	}
+	log.Println("✅ TLS client configured")
 
 	if err := gw.registerWithAuthService(); err != nil {
 		log.Printf("Warning: failed to register with auth service: %v", err)
@@ -77,16 +101,29 @@ func (gw *APIGateway) registerWithAuthService() error {
 	log.Println("📝 Registering with Auth Service...")
 
 	keyPair := models.ServiceKeyPair{
-		ServiceID: gw.serviceID,
-		PublicKey: gw.dilithiumKeyPair.GetPublicKeyBytes(),
+		ServiceID:      gw.serviceID,
+		PublicKey:       gw.dilithiumKeyPair.GetPublicKeyBytes(),
+		KyberPublicKey: gw.kyberKeyPair.GetPublicKeyBytes(),
 	}
 
-	payload, err := json.Marshal(keyPair)
+	// Sign the registration to prove key ownership
+	regPayload, err := json.Marshal(keyPair)
 	if err != nil {
 		return fmt.Errorf("failed to marshal registration request: %w", err)
 	}
 
-	resp, err := http.Post(gw.authServiceURL+"/register", "application/json", bytes.NewBuffer(payload))
+	sig, err := gw.dilithiumKeyPair.Sign(regPayload)
+	if err != nil {
+		return fmt.Errorf("failed to sign registration: %w", err)
+	}
+	keyPair.Signature = sig
+
+	payload, err := json.Marshal(keyPair)
+	if err != nil {
+		return fmt.Errorf("failed to marshal signed registration request: %w", err)
+	}
+
+	resp, err := gw.tlsClient.Post(gw.authServiceURL+"/register", "application/json", bytes.NewBuffer(payload))
 	if err != nil {
 		return fmt.Errorf("failed to register with auth service: %w", err)
 	}
@@ -110,7 +147,7 @@ func (gw *APIGateway) getServicePublicKey(serviceID string) ([]byte, error) {
 
 	log.Printf("🔍 Fetching public key for service: %s", serviceID)
 
-	resp, err := http.Get(fmt.Sprintf("%s/public-key/%s", gw.authServiceURL, serviceID))
+	resp, err := gw.tlsClient.Get(fmt.Sprintf("%s/public-key/%s", gw.authServiceURL, serviceID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch public key: %w", err)
 	}
@@ -142,6 +179,79 @@ func (gw *APIGateway) getServicePublicKey(serviceID string) ([]byte, error) {
 	return publicKeyBytes, nil
 }
 
+func (gw *APIGateway) getServiceKyberPublicKey(serviceID string) ([]byte, error) {
+	log.Printf("🔍 Fetching Kyber public key for service: %s", serviceID)
+
+	resp, err := gw.tlsClient.Get(fmt.Sprintf("%s/public-kyber-key/%s", gw.authServiceURL, serviceID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch Kyber public key: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get Kyber public key, status: %d", resp.StatusCode)
+	}
+
+	var response models.ServiceResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	var keyData map[string]interface{}
+	if err := json.Unmarshal(response.Data, &keyData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal key data: %w", err)
+	}
+
+	kyberKeyRaw, exists := keyData["kyber_public_key"]
+	if !exists {
+		return nil, fmt.Errorf("kyber_public_key field not found")
+	}
+
+	if keyStr, ok := kyberKeyRaw.(string); ok {
+		return base64.StdEncoding.DecodeString(keyStr)
+	}
+
+	return nil, fmt.Errorf("unexpected kyber_public_key type: %T", kyberKeyRaw)
+}
+
+func (gw *APIGateway) performPairwiseKeyExchange(serviceID string) error {
+	log.Printf("🤝 Performing pairwise key exchange with %s", serviceID)
+
+	kyberPubKey, err := gw.getServiceKyberPublicKey(serviceID)
+	if err != nil {
+		return fmt.Errorf("failed to get Kyber public key: %w", err)
+	}
+
+	ciphertext, sharedSecret, err := pqc.EncapsulateWithPublicKey(kyberPubKey)
+	if err != nil {
+		return fmt.Errorf("failed to encapsulate: %w", err)
+	}
+
+	exchangeReq := map[string]interface{}{
+		"service_id": gw.serviceID,
+		"ciphertext": ciphertext,
+	}
+	payload, _ := json.Marshal(exchangeReq)
+
+	backendURL := gw.backendServiceURL + "/key-exchange"
+	resp, err := gw.tlsClient.Post(backendURL, "application/json", bytes.NewBuffer(payload))
+	if err != nil {
+		return fmt.Errorf("key exchange request to %s failed: %w", serviceID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("key exchange with %s failed with status: %d", serviceID, resp.StatusCode)
+	}
+
+	gw.mutex.Lock()
+	gw.sharedSecrets[serviceID] = sharedSecret
+	gw.mutex.Unlock()
+
+	log.Printf("✅ Pairwise key exchange completed with %s, shared secret: %d bytes", serviceID, len(sharedSecret))
+	return nil
+}
+
 func (gw *APIGateway) verifyRequest(r *http.Request, serviceID string) error {
 	log.Printf("🔍 Verifying request from service: %s", serviceID)
 
@@ -161,7 +271,10 @@ func (gw *APIGateway) verifyRequest(r *http.Request, serviceID string) error {
 	}
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
 
-	signatureBytes := []byte(signature)
+	signatureBytes, err := base64.StdEncoding.DecodeString(signature)
+	if err != nil {
+		return fmt.Errorf("invalid base64 signature: %w", err)
+	}
 	if err := pqc.VerifyDilithiumSignature(publicKey, body, signatureBytes); err != nil {
 		return fmt.Errorf("signature verification failed: %w", err)
 	}
@@ -189,9 +302,28 @@ func (gw *APIGateway) forwardToBackend(w http.ResponseWriter, r *http.Request) {
 		requestBody = json.RawMessage(body)
 	}
 
+	// Encrypt the request data if we have a shared secret
+	gw.mutex.RLock()
+	sharedSecret, hasSecret := gw.sharedSecrets["backend-service"]
+	gw.mutex.RUnlock()
+
+	if hasSecret {
+		encryptedBytes, err := pqc.Encrypt(sharedSecret, requestBody)
+		if err != nil {
+			log.Printf("❌ Failed to encrypt request data: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		// Wrap encrypted bytes as a JSON base64 string so json.RawMessage can marshal it
+		encoded := base64.StdEncoding.EncodeToString(encryptedBytes)
+		requestBody, _ = json.Marshal(encoded)
+		log.Printf("🔒 Encrypted request data (%d bytes)", len(encryptedBytes))
+	}
+
 	requestData := models.ServiceRequest{
 		ServiceID: gw.serviceID,
 		Timestamp: time.Now(),
+		Nonce:     generateNonce(),
 		Data:      requestBody,
 		Headers:   make(map[string]string),
 	}
@@ -229,7 +361,10 @@ func (gw *APIGateway) forwardToBackend(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Service-ID", gw.serviceID)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: gw.tlsClient.Transport,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("❌ Backend request failed: %v", err)
@@ -260,6 +395,30 @@ func (gw *APIGateway) forwardToBackend(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("✅ Backend response verified successfully")
 
+	// Decrypt response Data if we have a shared secret
+	if hasSecret {
+		var encoded string
+		if err := json.Unmarshal(backendResponse.Data, &encoded); err != nil {
+			log.Printf("❌ Failed to unmarshal encrypted response: %v", err)
+			http.Error(w, "Decryption error", http.StatusInternalServerError)
+			return
+		}
+		encryptedBytes, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			log.Printf("❌ Failed to decode base64 response: %v", err)
+			http.Error(w, "Decryption error", http.StatusInternalServerError)
+			return
+		}
+		decryptedData, err := pqc.Decrypt(sharedSecret, encryptedBytes)
+		if err != nil {
+			log.Printf("❌ Failed to decrypt backend response: %v", err)
+			http.Error(w, "Decryption error", http.StatusInternalServerError)
+			return
+		}
+		backendResponse.Data = decryptedData
+		log.Printf("🔓 Decrypted response data (%d bytes)", len(decryptedData))
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Gateway-Service", gw.serviceID)
 	w.WriteHeader(resp.StatusCode)
@@ -279,6 +438,12 @@ func (gw *APIGateway) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/health" {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Gateway OK"))
+		return
+	}
+
+	if err := gw.verifyRequest(r, clientID); err != nil {
+		log.Printf("❌ Client request verification failed: %v", err)
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
 		return
 	}
 
@@ -311,7 +476,7 @@ func (gw *APIGateway) performKeyExchange() error {
 	request.Signature = signature
 
 	payload, _ := json.Marshal(request)
-	resp, err := http.Post(gw.authServiceURL+"/key-exchange", "application/json", bytes.NewBuffer(payload))
+	resp, err := gw.tlsClient.Post(gw.authServiceURL+"/key-exchange", "application/json", bytes.NewBuffer(payload))
 	if err != nil {
 		return fmt.Errorf("key exchange request failed: %w", err)
 	}
@@ -335,6 +500,21 @@ func (gw *APIGateway) performKeyExchange() error {
 	return nil
 }
 
+func (gw *APIGateway) startKeyRotation(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			log.Println("🔄 Rotating shared secret with backend-service...")
+			if err := gw.performPairwiseKeyExchange("backend-service"); err != nil {
+				log.Printf("❌ Key rotation failed: %v", err)
+			} else {
+				log.Println("✅ Key rotation completed successfully")
+			}
+		}
+	}()
+}
+
 func main() {
 	gateway, err := NewAPIGateway()
 	if err != nil {
@@ -345,9 +525,34 @@ func main() {
 		log.Printf("Warning: key exchange failed: %v", err)
 	}
 
+	if err := gateway.performPairwiseKeyExchange("backend-service"); err != nil {
+		log.Printf("Warning: pairwise key exchange with backend failed: %v", err)
+	}
+
+	// Start periodic key rotation (every 1 hour)
+	gateway.startKeyRotation(1 * time.Hour)
+	log.Println("✅ Periodic key rotation enabled (1 hour interval)")
+
 	r := mux.NewRouter()
+	r.HandleFunc("/metrics", pqc.MetricsHandler()).Methods("GET")
 	r.PathPrefix("/").HandlerFunc(gateway.handleRequest)
 
-	log.Println("🌟 API Gateway starting on :8081")
-	log.Fatal(http.ListenAndServe(":8081", r))
+	caCert, caKey, _, err := pqc.GenerateCA("keys")
+	if err != nil {
+		log.Fatalf("Failed to load CA: %v", err)
+	}
+	tlsCert, err := pqc.GenerateServiceCert("keys", "api-gateway", caCert, caKey)
+	if err != nil {
+		log.Fatalf("Failed to generate TLS cert: %v", err)
+	}
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+	}
+	server := &http.Server{
+		Addr:      ":8081",
+		Handler:   r,
+		TLSConfig: tlsConfig,
+	}
+	log.Println("🌟 API Gateway starting on :8081 (TLS)")
+	log.Fatal(server.ListenAndServeTLS("", ""))
 }
