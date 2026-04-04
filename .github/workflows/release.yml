@@ -8,6 +8,8 @@ on:
 permissions:
   packages: write
   contents: write
+  attestations: write
+  id-token: write
 
 env:
   REGISTRY: ghcr.io
@@ -65,6 +67,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
 
   release:
     runs-on: ubuntu-latest
