@@ -1,0 +1,16 @@
+# Generated keys and certificates
+keys/
+
+# Build artifacts
+bin/
+quantum-safe-mesh
+
+# Logs
+logs/
+*.log
+
+# PID files
+.*.pid
+
+# Claude Code worktrees
+.claude/worktrees/

@@ -26,6 +26,7 @@ WORKDIR /root/
 
 # Copy the binary from builder stage
 COPY --from=builder /app/auth .
+RUN chmod +x ./auth
 
 # Create keys directory
 RUN mkdir -p /root/keys

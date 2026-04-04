@@ -69,9 +69,6 @@ Get the full image name
 */}}
 {{- define "quantum-safe-mesh.image" -}}
 {{- $registry := .registry -}}
-{{- if .Values.global.imageRegistry -}}
-{{- $registry = .Values.global.imageRegistry -}}
-{{- end -}}
 {{- if $registry -}}
 {{- printf "%s/%s:%s" $registry .repository .tag -}}
 {{- else -}}

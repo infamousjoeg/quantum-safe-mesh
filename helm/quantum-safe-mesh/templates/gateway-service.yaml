@@ -21,7 +21,7 @@ spec:
         component: gateway
         {{- include "quantum-safe-mesh.labels" . | nindent 8 }}
       annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/gateway-service.yaml") . | sha256sum }}
+        checksum/config: {{ .Values | toYaml | sha256sum }}
         {{- if .Values.monitoring.prometheus.enabled }}
         prometheus.io/scrape: "true"
         prometheus.io/port: {{ .Values.gatewayService.port | quote }}

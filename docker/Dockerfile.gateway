@@ -26,6 +26,7 @@ WORKDIR /root/
 
 # Copy the binary from builder stage
 COPY --from=builder /app/gateway .
+RUN chmod +x ./gateway
 
 # Create keys directory
 RUN mkdir -p /root/keys
