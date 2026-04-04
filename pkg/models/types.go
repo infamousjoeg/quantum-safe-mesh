@@ -6,14 +6,17 @@ import (
 )
 
 type ServiceKeyPair struct {
-	ServiceID  string `json:"service_id"`
-	PublicKey  []byte `json:"public_key"`
-	PrivateKey []byte `json:"private_key,omitempty"`
+	ServiceID      string `json:"service_id"`
+	PublicKey       []byte `json:"public_key"`
+	KyberPublicKey []byte `json:"kyber_public_key,omitempty"`
+	PrivateKey     []byte `json:"private_key,omitempty"`
+	Signature      []byte `json:"signature,omitempty"`
 }
 
 type ServiceRequest struct {
 	ServiceID string            `json:"service_id"`
 	Timestamp time.Time         `json:"timestamp"`
+	Nonce     string            `json:"nonce,omitempty"`
 	Data      json.RawMessage   `json:"data"`
 	Signature []byte            `json:"signature"`
 	Headers   map[string]string `json:"headers,omitempty"`

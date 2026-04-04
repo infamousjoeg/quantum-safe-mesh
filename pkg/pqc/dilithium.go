@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/cloudflare/circl/sign/dilithium/mode3"
@@ -16,18 +15,10 @@ type DilithiumKeyPair struct {
 }
 
 func GenerateDilithiumKeyPair() (*DilithiumKeyPair, error) {
-	log.Println("🔑 Generating Dilithium3 keypair...")
-	start := time.Now()
-
 	publicKey, privateKey, err := mode3.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate Dilithium keypair: %w", err)
 	}
-
-	duration := time.Since(start)
-	log.Printf("✅ Dilithium3 keypair generated in %v", duration)
-	log.Printf("📏 Public key size: %d bytes, Private key size: %d bytes",
-		mode3.PublicKeySize, mode3.PrivateKeySize)
 
 	return &DilithiumKeyPair{
 		PublicKey:  *publicKey,
@@ -36,14 +27,9 @@ func GenerateDilithiumKeyPair() (*DilithiumKeyPair, error) {
 }
 
 func (d *DilithiumKeyPair) Sign(data []byte) ([]byte, error) {
-	log.Printf("🖊️  Signing data with Dilithium3 (data size: %d bytes)", len(data))
-	start := time.Now()
-
+	GlobalMetrics.SignCount.Add(1)
 	signature := make([]byte, mode3.SignatureSize)
 	mode3.SignTo(&d.PrivateKey, data, signature)
-
-	duration := time.Since(start)
-	log.Printf("✅ Data signed in %v (signature size: %d bytes)", duration, len(signature))
 
 	return signature, nil
 }
@@ -57,10 +43,7 @@ func (d *DilithiumKeyPair) GetPrivateKeyBytes() []byte {
 }
 
 func VerifyDilithiumSignature(publicKeyBytes, data, signature []byte) error {
-	log.Printf("🔍 Verifying Dilithium3 signature (data: %d bytes, sig: %d bytes)",
-		len(data), len(signature))
-	start := time.Now()
-
+	GlobalMetrics.VerifyCount.Add(1)
 	if len(publicKeyBytes) != mode3.PublicKeySize {
 		return fmt.Errorf("invalid public key size: expected %d, got %d", mode3.PublicKeySize, len(publicKeyBytes))
 	}
@@ -72,13 +55,9 @@ func VerifyDilithiumSignature(publicKeyBytes, data, signature []byte) error {
 	}
 
 	if !mode3.Verify(&publicKey, data, signature) {
-		duration := time.Since(start)
-		log.Printf("❌ Signature verification failed in %v", duration)
+		GlobalMetrics.VerifyFailCount.Add(1)
 		return fmt.Errorf("invalid signature")
 	}
-
-	duration := time.Since(start)
-	log.Printf("✅ Signature verified successfully in %v", duration)
 
 	return nil
 }
