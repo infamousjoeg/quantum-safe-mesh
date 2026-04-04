@@ -37,7 +37,7 @@ authService:
   name: auth-service
   image:
     registry: "ghcr.io"
-    repository: infamousjoeg/quantum-safe-mesh/auth
+    repository: infamousjoeg/quantum-safe-mesh-auth
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 2
@@ -78,7 +78,7 @@ gatewayService:
   name: gateway-service
   image:
     registry: "ghcr.io"
-    repository: infamousjoeg/quantum-safe-mesh/gateway
+    repository: infamousjoeg/quantum-safe-mesh-gateway
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 3
@@ -130,7 +130,7 @@ backendService:
   name: backend-service
   image:
     registry: "ghcr.io"
-    repository: infamousjoeg/quantum-safe-mesh/backend
+    repository: infamousjoeg/quantum-safe-mesh-backend
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 2
@@ -171,7 +171,7 @@ demoJob:
   name: quantum-safe-demo
   image:
     registry: "ghcr.io"
-    repository: infamousjoeg/quantum-safe-mesh/demo
+    repository: infamousjoeg/quantum-safe-mesh-demo
     tag: latest
     pullPolicy: IfNotPresent
   resources:

@@ -620,9 +620,9 @@ This creates an annotated git tag and pushes it to GitHub. From there, GitHub Ac
 1. **Test** -- The workflow runs `go build`, `go test`, and `go vet` against the tagged commit. This is the same test suite that runs on every push, ensuring the release candidate passes the same quality bar as any other commit. If tests fail, the pipeline stops and no images are published.
 
 2. **Build and Push** -- Once tests pass, Docker builds all three service images in parallel using a build matrix. Each image is tagged with both the version number (e.g., `1.2.0`) and `latest`. The images are pushed to GitHub Container Registry (GHCR):
-   - `ghcr.io/infamousjoeg/quantum-safe-mesh/auth`
-   - `ghcr.io/infamousjoeg/quantum-safe-mesh/gateway`
-   - `ghcr.io/infamousjoeg/quantum-safe-mesh/backend`
+   - `ghcr.io/infamousjoeg/quantum-safe-mesh-auth`
+   - `ghcr.io/infamousjoeg/quantum-safe-mesh-gateway`
+   - `ghcr.io/infamousjoeg/quantum-safe-mesh-backend`
 
    The build uses `docker/metadata-action` to generate OCI-compliant labels (source URL, version, license) so that anyone inspecting the image can trace it back to the exact commit and repository.
 

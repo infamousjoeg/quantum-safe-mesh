@@ -13,7 +13,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/infamousjoeg/quantum-safe-mesh
+  IMAGE_PREFIX: ghcr.io/infamousjoeg
 
 jobs:
   test:
@@ -54,7 +54,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          images: ${{ env.IMAGE_PREFIX }}/quantum-safe-mesh-${{ matrix.service }}
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest
