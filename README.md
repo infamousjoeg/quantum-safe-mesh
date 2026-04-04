@@ -601,6 +601,41 @@ Each guide includes:
 - [ ] Security scanning and vulnerability management
 - [ ] Compliance reporting (SOC2, ISO 27001)
 
+## 🚢 Releasing
+
+### Why Unified Versioning?
+
+All three services in this mesh -- auth, gateway, and backend -- share the same cryptographic library (`pkg/pqc/`) and the same data models (`pkg/models/`). A change to how Dilithium signatures are verified or how Kyber key exchange works affects every service simultaneously. If you versioned each service independently, you'd risk deploying a gateway that speaks protocol v2 to a backend still running protocol v1. That's why this project uses a **single version tag** for all services: when you release `v2.0.0`, all three images are built and published together, guaranteeing compatibility.
+
+### How the Release Pipeline Works
+
+Releasing a new version is a single command that triggers a fully automated pipeline:
+
+```bash
+make release-tag VERSION=v2.0.0
+```
+
+This creates an annotated git tag and pushes it to GitHub. From there, GitHub Actions takes over:
+
+1. **Test** -- The workflow runs `go build`, `go test`, and `go vet` against the tagged commit. This is the same test suite that runs on every push, ensuring the release candidate passes the same quality bar as any other commit. If tests fail, the pipeline stops and no images are published.
+
+2. **Build and Push** -- Once tests pass, Docker builds all three service images in parallel using a build matrix. Each image is tagged with both the version number (e.g., `1.2.0`) and `latest`. The images are pushed to GitHub Container Registry (GHCR):
+   - `ghcr.io/infamousjoeg/quantum-safe-mesh/auth`
+   - `ghcr.io/infamousjoeg/quantum-safe-mesh/gateway`
+   - `ghcr.io/infamousjoeg/quantum-safe-mesh/backend`
+
+   The build uses `docker/metadata-action` to generate OCI-compliant labels (source URL, version, license) so that anyone inspecting the image can trace it back to the exact commit and repository.
+
+3. **GitHub Release** -- After images are published, the workflow creates a GitHub Release with auto-generated changelog notes. GitHub compares the new tag against the previous one and lists all commits, PRs, and contributors -- giving you a human-readable summary of what changed.
+
+4. **Helm Chart Update** -- Finally, the workflow updates `helm/quantum-safe-mesh/Chart.yaml` with the new version number and commits it back to the main branch. This keeps the Helm chart in sync with the published images, so `helm install` always pulls the right version by default.
+
+### Why This Design?
+
+This pipeline follows a principle common in release engineering: **the tag is the single source of truth**. You don't edit version numbers in files, build images manually, or create releases by hand. You push a tag, and automation handles the rest. This eliminates an entire class of mistakes -- wrong version in a config file, forgetting to push an image, publishing a release from untested code.
+
+The pipeline also ensures that every published artifact is traceable. The OCI labels on each Docker image point back to the source repository. The GitHub Release links to the exact commit. The Helm chart version matches the image tags. There's no ambiguity about what code is running in production.
+
 ## 🤝 Contributing
 
 1. Fork the repository

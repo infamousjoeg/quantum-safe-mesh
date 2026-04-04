@@ -3,9 +3,9 @@ name: quantum-safe-mesh
 description: A Post-Quantum Cryptography Service Mesh Demo for Kubernetes
 version: 1.0.1
 appVersion: "1.0.1"
-home: https://github.com/quantum-safe/mesh-demo
+home: https://github.com/infamousjoeg/quantum-safe-mesh
 sources:
-  - https://github.com/quantum-safe/mesh-demo
+  - https://github.com/infamousjoeg/quantum-safe-mesh
 maintainers:
   - name: Quantum Safe Team
     email: security@quantum-safe.io

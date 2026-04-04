@@ -3,7 +3,7 @@
 
 global:
   # Global image registry
-  imageRegistry: ""
+  imageRegistry: "ghcr.io"
   # Global image pull secrets
   imagePullSecrets: []
   # Global storage class
@@ -36,8 +36,8 @@ authService:
   enabled: true
   name: auth-service
   image:
-    registry: ""
-    repository: quantum-safe-mesh/auth
+    registry: "ghcr.io"
+    repository: infamousjoeg/quantum-safe-mesh/auth
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 2
@@ -77,8 +77,8 @@ gatewayService:
   enabled: true
   name: gateway-service
   image:
-    registry: ""
-    repository: quantum-safe-mesh/gateway
+    registry: "ghcr.io"
+    repository: infamousjoeg/quantum-safe-mesh/gateway
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 3
@@ -129,8 +129,8 @@ backendService:
   enabled: true
   name: backend-service
   image:
-    registry: ""
-    repository: quantum-safe-mesh/backend
+    registry: "ghcr.io"
+    repository: infamousjoeg/quantum-safe-mesh/backend
     tag: latest
     pullPolicy: IfNotPresent
   replicaCount: 2
@@ -170,8 +170,8 @@ demoJob:
   enabled: true
   name: quantum-safe-demo
   image:
-    registry: ""
-    repository: quantum-safe-mesh/demo
+    registry: "ghcr.io"
+    repository: infamousjoeg/quantum-safe-mesh/demo
     tag: latest
     pullPolicy: IfNotPresent
   resources:
